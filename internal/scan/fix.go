@@ -82,6 +82,22 @@ func poolFix(cl *inventory.Cluster, rf check.RawFinding, desc check.Descriptor) 
 		return fix
 	}
 
+	// Karpenter first, because it wins over the cloud CLI wherever both are
+	// present. A Karpenter NodePool is not an ASG or a VMSS: `eksctl scale
+	// nodegroup --name <nodepool>` names an object that does not exist, and if
+	// a similarly named node group *does* exist the command silently acts on
+	// the wrong thing. Karpenter also has no minimum size to lower, so the only
+	// honest suggestion is to look at what is stopping consolidation.
+	if cl.Autoscaler.Reclaims() {
+		fix.Rationale = "Karpenter manages this pool and has no minimum size, so there is no floor " +
+			"to lower — it should have consolidated these nodes already. Something is preventing " +
+			"that: a disruption budget, a do-not-disrupt annotation, or a pod Karpenter will not " +
+			"move. Nothing here needs scaling down; find what is holding it."
+		fix.Command = fmt.Sprintf(
+			"kubectl get nodepool %s -o yaml   # check spec.disruption", rf.Subject.Pool)
+		return fix
+	}
+
 	provider := ""
 	for _, name := range rf.Subject.Nodes {
 		if n := cl.NodeByName(name); n != nil {

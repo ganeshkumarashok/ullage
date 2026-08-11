@@ -119,7 +119,9 @@ func (g *Gatherer) Gather(ctx context.Context, opts Options) (*inventory.Cluster
 		for _, grp := range status.Groups {
 			floors[grp.Name] = grp.MinSize
 		}
-		cl.Autoscaler = &inventory.AutoscalerView{Kind: "cluster-autoscaler", Floors: floors}
+		cl.Autoscaler = &inventory.AutoscalerView{
+			Kind: "cluster-autoscaler", Floors: floors,
+		}
 	} else if kp, err := g.Kube.KarpenterNodePools(ctx); err == nil && kp != nil {
 		pinned, scheduled := map[string]bool{}, map[string]bool{}
 		for name, np := range kp.NodePools {
@@ -162,6 +164,13 @@ func (g *Gatherer) Gather(ctx context.Context, opts Options) (*inventory.Cluster
 		})
 	}
 	sort.Slice(cl.Nodes, func(i, j int) bool { return cl.Nodes[i].Name < cl.Nodes[j].Name })
+
+	// Deciding which pool an autoscaler node group belongs to needs the full
+	// list of pool names, so it happens here rather than where the autoscaler
+	// was read — the nodes did not exist yet at that point.
+	if cl.Autoscaler != nil {
+		cl.Autoscaler.Pools = poolNames(cl.Nodes)
+	}
 
 	// Attribution is counted after the join, not assumed from the census: a
 	// device whose metrics exist but carry no pod is not an analysed device.
@@ -603,3 +612,18 @@ func draDevicesByNode(claims []kube.ResourceClaim, pods []kube.Pod) map[string]i
 }
 
 var _ = check.Params{}
+
+// poolNames lists the distinct pool names in the cluster, sorted.
+func poolNames(nodes []inventory.NodeView) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, n := range nodes {
+		if n.Pool == "" || seen[n.Pool] {
+			continue
+		}
+		seen[n.Pool] = true
+		out = append(out, n.Pool)
+	}
+	sort.Strings(out)
+	return out
+}

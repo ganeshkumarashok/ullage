@@ -212,6 +212,11 @@ type AutoscalerView struct {
 	// Scheduled are Karpenter NodePools pinned only during a cron window, which
 	// ullage does not evaluate. Reported as context, never as a hold.
 	Scheduled map[string]bool
+
+	// Pools are every pool name in the cluster, which is what makes it possible
+	// to decide that node group "aks-gpu-big-1234-vmss" belongs to pool
+	// "gpu-big" and not to pool "gpu".
+	Pools []string
 }
 
 // Reclaims reports whether this autoscaler removes empty nodes on its own
@@ -256,16 +261,25 @@ func (a *AutoscalerView) Floor(pool string) (int, bool) {
 	if v, ok := a.Floors[pool]; ok {
 		return v, true
 	}
-	// One Kubernetes pool is routinely several autoscaler node groups: AKS
-	// creates one VMSS per availability zone and EKS one ASG per zone, and GPU
-	// capacity is zone-constrained often enough that this is the normal case
-	// rather than an edge one.
+	// Two problems at once, and they have to be solved together.
 	//
-	// So the floors are summed, not picked between. Choosing one group's
-	// minimum would answer a question nobody asked: with zone minimums of
-	// {0, 0, 2} the pool's real floor is 2, but picking a single group returns
-	// 0 — calling genuinely reserved capacity waste — or returns 2 for a pool
-	// that only reserves a third of what that implies.
+	// First, one Kubernetes pool is routinely several autoscaler node groups:
+	// AKS creates one VMSS per availability zone and EKS one ASG per zone, and
+	// GPU capacity is zone-constrained often enough that this is the normal
+	// case. So floors must be summed — with zone minimums of {0, 0, 2} the
+	// pool's real floor is 2, and picking any single group returns 0 (calling
+	// reserved capacity waste) or 2 (overstating the reservation threefold).
+	//
+	// Second, pool names nest. "aks-gpu-big-1234-vmss" contains "gpu", so a
+	// naive match sums the floors of pool "gpu-big" into pool "gpu". Summing
+	// makes that worse than picking one did, and it fails silently in the
+	// direction of hiding real waste.
+	//
+	// So each node group is assigned to exactly one pool — the longest pool
+	// name that matches it, which is the one it actually belongs to — and only
+	// then are the floors summed. Ownership is decided globally rather than
+	// per-query, because "does this group belong to me?" cannot be answered
+	// without knowing who else is asking.
 	total, found := 0, false
 	names := make([]string, 0, len(a.Floors))
 	for name := range a.Floors {
@@ -273,13 +287,35 @@ func (a *AutoscalerView) Floor(pool string) (int, bool) {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		if !containsPool(name, pool) {
+		// With no pool list there is nothing to disambiguate against, so fall
+		// back to matching directly. Callers that can supply Pools get the
+		// stronger answer; callers that cannot are no worse off than before.
+		if len(a.Pools) == 0 {
+			if !containsPool(name, pool) {
+				continue
+			}
+		} else if a.owner(name) != pool {
 			continue
 		}
 		total += a.Floors[name]
 		found = true
 	}
 	return total, found
+}
+
+// owner returns the pool a node group belongs to: the longest pool name that
+// matches it. Ties are broken by name so the answer is stable.
+func (a *AutoscalerView) owner(group string) string {
+	best := ""
+	for _, pool := range a.Pools {
+		if !containsPool(group, pool) {
+			continue
+		}
+		if len(pool) > len(best) || (len(pool) == len(best) && pool < best) {
+			best = pool
+		}
+	}
+	return best
 }
 
 func containsPool(groupName, pool string) bool {

@@ -551,7 +551,7 @@ func TestUnusedNodeNeverRecommendsDeletingBusyHardware(t *testing.T) {
 // one VMSS per zone, EKS one ASG per zone — and GPU capacity is zone
 // constrained, so this is the normal shape rather than an edge case.
 func TestAutoscalerFloorSumsZonalNodeGroups(t *testing.T) {
-	a := &inventory.AutoscalerView{Floors: map[string]int{
+	a := &inventory.AutoscalerView{Pools: []string{"h100", "other"}, Floors: map[string]int{
 		"aks-h100-12345678-vmss-eastus2-1": 0,
 		"aks-h100-12345678-vmss-eastus2-2": 0,
 		"aks-h100-12345678-vmss-eastus2-3": 2,
@@ -565,5 +565,26 @@ func TestAutoscalerFloorSumsZonalNodeGroups(t *testing.T) {
 		t.Fatalf("floor %d, want 2: picking one zone's minimum instead of summing them "+
 			"either calls reserved capacity waste (when the zero wins) or overstates the "+
 			"reservation threefold (when the two does)", got)
+	}
+}
+
+// Pool names nest. Summing the floors of every node group whose name contains
+// the pool sums pool "gpu-big" into pool "gpu", which is worse than picking
+// one — and it fails silently, in the direction of hiding real waste.
+func TestAutoscalerFloorDoesNotStealAnotherPoolsNodeGroups(t *testing.T) {
+	a := &inventory.AutoscalerView{
+		Pools: []string{"gpu", "gpu-big"},
+		Floors: map[string]int{
+			"aks-gpu-11111111-vmss":     1,
+			"aks-gpu-big-22222222-vmss": 4,
+		},
+	}
+	if got, _ := a.Floor("gpu"); got != 1 {
+		t.Fatalf("floor for pool gpu is %d, want 1: the gpu-big node group belongs to "+
+			"pool gpu-big, and counting its floor here overstates what is reserved and "+
+			"hides genuinely idle capacity", got)
+	}
+	if got, _ := a.Floor("gpu-big"); got != 4 {
+		t.Fatalf("floor for pool gpu-big is %d, want 4", got)
 	}
 }
