@@ -46,7 +46,8 @@ Usage:
 Common flags:
   --prometheus URL       metrics endpoint (required unless --demo)
   --window DURATION      analysis window (default 14d)
-  --output FORMAT        table | json (default table)
+  --output FORMAT        table | json | html (default table)
+  --redact               strip cluster, owner and endpoint names from --output html
   --top N                rows to show (default 10)
   --namespace NS         restrict to a namespace (repeatable)
   --checks LIST          comma-separated check IDs to run
@@ -218,6 +219,7 @@ type flags struct {
 	config        string
 
 	output   string
+	redact   bool
 	top      int
 	noCost   bool
 	noColor  bool
@@ -263,8 +265,9 @@ func newFlags(name string) *flags {
 	f.fs.StringVar(&f.pricing, "pricing", "", "path to a pricing file")
 	f.fs.StringVar(&f.config, "config", config.DefaultPath, "suppression file")
 
-	f.fs.StringVar(&f.output, "output", "table", "table | json")
-	f.fs.StringVar(&f.output, "o", "table", "table | json (shorthand)")
+	f.fs.StringVar(&f.output, "output", "table", "table | json | html")
+	f.fs.StringVar(&f.output, "o", "table", "table | json | html (shorthand)")
+	f.fs.BoolVar(&f.redact, "redact", false, "remove cluster, owner and endpoint names from the report")
 	f.fs.IntVar(&f.top, "top", 10, "rows to show")
 	f.fs.BoolVar(&f.noCost, "no-cost", false, "omit cost estimates")
 	f.fs.BoolVar(&f.noColor, "no-color", false, "disable colour")
@@ -446,6 +449,20 @@ func emit(res *api.Result, f *flags) error {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(res); err != nil {
+			return err
+		}
+	case "html":
+		o := render.HTMLOptions{
+			Options: render.Options{
+				Version:       version,
+				Top:           f.top,
+				MinConfidence: res.Scan.Params.MinConfidence,
+				NoCost:        f.noCost,
+				ConfigFile:    f.config,
+			},
+			Redact: f.redact,
+		}
+		if err := render.HTML(os.Stdout, res, o); err != nil {
 			return err
 		}
 	case "table":

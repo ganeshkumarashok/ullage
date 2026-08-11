@@ -1,0 +1,299 @@
+/* ullage report styles.
+ *
+ * Everything here ships inside the binary and is inlined into the document.
+ * No web font, no CDN, no network request: the report has to open from a
+ * file:// URL on a laptop with no cluster access, which is where it will
+ * usually be read. */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #fbfaf7;
+  --panel: #ffffff;
+  --ink: #1a1a19;
+  --ink-soft: #55534e;
+  --ink-faint: #85827a;
+  --rule: #e3e0d8;
+
+  /* Fallow is the subject of the report, so it gets the one warm accent.
+   * Everything ullage declined to call waste is deliberately cooler and
+   * quieter than the thing it is asking you to look at. */
+  --fallow: #b45309;
+  --fallow-soft: #fde9c8;
+  --design: #1d4ed8;
+  --design-soft: #dbe6fe;
+  --neutral: #9a968c;
+  --neutral-soft: #ece9e1;
+  --residual: #3f6212;
+  --residual-soft: #e4edd4;
+  --danger: #b91c1c;
+
+  --radius: 10px;
+  --pad: 1.25rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16151a;
+    --panel: #1e1d23;
+    --ink: #f2f0ec;
+    --ink-soft: #b8b4ab;
+    --ink-faint: #85817a;
+    --rule: #35333c;
+    --fallow: #fbbf24;
+    --fallow-soft: #45320f;
+    --design: #93b4fd;
+    --design-soft: #1e2a4d;
+    --neutral: #6f6b64;
+    --neutral-soft: #2b2a31;
+    --residual: #a3c368;
+    --residual-soft: #26301a;
+    --danger: #fca5a5;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 2rem 1.25rem 4rem;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+        "Helvetica Neue", Arial, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+.wrap { max-width: 62rem; margin: 0 auto; }
+
+code, .mono, pre {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+               "Liberation Mono", monospace;
+}
+
+a { color: inherit; }
+
+/* ---------- masthead ---------- */
+
+.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 1rem; margin-bottom: 1.75rem; }
+
+.wordmark {
+  font-size: 1.6rem; font-weight: 700; letter-spacing: -0.02em; margin: 0;
+}
+.wordmark .tag { font-weight: 400; color: var(--ink-soft); font-size: 1rem; letter-spacing: 0; }
+
+.meta {
+  margin: 0.6rem 0 0; padding: 0; list-style: none;
+  display: flex; flex-wrap: wrap; gap: 0.35rem 1.25rem;
+  font-size: 0.82rem; color: var(--ink-soft);
+}
+.meta code { color: var(--ink); }
+
+.assurance {
+  display: inline-flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem;
+  font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase;
+}
+.assurance span {
+  border: 1px solid var(--rule); border-radius: 999px; padding: 0.15rem 0.6rem;
+  color: var(--ink-soft);
+}
+
+/* ---------- headline ---------- */
+
+.headline { margin: 2rem 0 0.35rem; }
+.headline .big {
+  font-size: clamp(2.1rem, 6vw, 3.2rem); font-weight: 700;
+  letter-spacing: -0.03em; line-height: 1.05; color: var(--fallow);
+}
+.headline .qualifier { font-size: 1rem; color: var(--ink-soft); margin-top: 0.35rem; }
+
+.nothing { font-size: 1.4rem; font-weight: 600; color: var(--residual); }
+
+/* ---------- panels ---------- */
+
+section { margin-top: 2.5rem; }
+
+h2 {
+  font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--ink-faint); margin: 0 0 0.85rem; font-weight: 600;
+}
+
+.panel {
+  background: var(--panel); border: 1px solid var(--rule);
+  border-radius: var(--radius); padding: var(--pad);
+}
+
+.lede { color: var(--ink-soft); max-width: 46rem; margin: 0 0 1rem; }
+
+/* ---------- waterfall ---------- */
+
+.waterfall { width: 100%; height: auto; display: block; }
+.waterfall .track { fill: var(--neutral-soft); }
+.waterfall .bar-fallow { fill: var(--fallow); }
+.waterfall .bar-design { fill: var(--design); }
+.waterfall .bar-neutral { fill: var(--neutral); }
+.waterfall .bar-residual { fill: var(--residual); }
+.waterfall .bar-suppressed { fill: var(--fallow); opacity: 0.45; }
+.waterfall .connector { stroke: var(--rule); stroke-width: 1; stroke-dasharray: 2 3; }
+.waterfall text { fill: var(--ink); font-size: 12px; }
+.waterfall .lbl { font-weight: 600; }
+.waterfall .sub { fill: var(--ink-faint); font-size: 10.5px; }
+.waterfall .val { font-variant-numeric: tabular-nums; }
+
+/* Hatching marks capacity that is empty on purpose. It is the one bucket a
+ * reader must never mistake for waste, so it is distinguished by pattern and
+ * by label, not by hue alone. */
+.hatch-design { fill: url(#hatch); }
+
+/* ---------- ledger table ---------- */
+
+table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+th, td { text-align: left; padding: 0.55rem 0.6rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th {
+  font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--ink-faint); font-weight: 600; border-bottom: 1px solid var(--ink);
+}
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tbody tr:last-child td { border-bottom: none; }
+tr.total td { border-top: 2px solid var(--ink); font-weight: 700; }
+
+.swatch {
+  display: inline-block; width: 0.65rem; height: 0.65rem; border-radius: 2px;
+  margin-right: 0.5rem; vertical-align: baseline; border: 1px solid rgba(0,0,0,.18);
+}
+.sw-fallow { background: var(--fallow); }
+.sw-design { background: var(--design); }
+.sw-neutral { background: var(--neutral); }
+.sw-residual { background: var(--residual); }
+.sw-suppressed { background: var(--fallow); opacity: 0.45; }
+
+.rownote { display: block; color: var(--ink-faint); font-size: 0.78rem; margin-top: 0.15rem; }
+
+/* ---------- owner bars ---------- */
+
+.owners { list-style: none; margin: 0; padding: 0; }
+.owners li { padding: 0.5rem 0; border-bottom: 1px solid var(--rule); }
+.owners li:last-child { border-bottom: none; }
+.owner-head { display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; }
+.owner-name { font-weight: 600; }
+.owner-fig { color: var(--ink-soft); font-size: 0.85rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.owner-track { background: var(--neutral-soft); border-radius: 3px; height: 0.5rem; margin-top: 0.4rem; overflow: hidden; }
+.owner-fill { background: var(--fallow); height: 100%; border-radius: 3px; }
+
+/* ---------- findings ---------- */
+
+details.finding {
+  border: 1px solid var(--rule); border-radius: var(--radius);
+  background: var(--panel); margin-bottom: 0.6rem;
+}
+details.finding[open] { border-color: var(--ink-faint); }
+details.finding > summary {
+  cursor: pointer; padding: 0.85rem var(--pad); list-style: none;
+  display: grid; grid-template-columns: 2.2rem 1fr auto; gap: 0.75rem; align-items: baseline;
+}
+details.finding > summary::-webkit-details-marker { display: none; }
+summary:focus-visible { outline: 2px solid var(--fallow); outline-offset: 2px; }
+
+.rank { color: var(--ink-faint); font-variant-numeric: tabular-nums; font-size: 0.85rem; }
+.subject { font-weight: 600; }
+.subject .kindtag {
+  font-weight: 400; color: var(--ink-faint); font-size: 0.78rem; margin-left: 0.45rem;
+}
+.subject-sub { color: var(--ink-soft); font-size: 0.83rem; margin-top: 0.15rem; }
+.figures { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.figures .cost { font-weight: 700; }
+.figures .hrs { display: block; color: var(--ink-faint); font-size: 0.8rem; }
+
+.badges { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.4rem; }
+.badge {
+  font-size: 0.68rem; letter-spacing: 0.05em; text-transform: uppercase;
+  border: 1px solid var(--rule); border-radius: 999px; padding: 0.1rem 0.5rem;
+  color: var(--ink-soft); white-space: nowrap;
+}
+/* Confidence is carried by the word itself as well as the border, so it
+ * survives greyscale printing and colour-blind readers. */
+.badge.conf-high { border-color: var(--fallow); color: var(--fallow); font-weight: 600; }
+.badge.conf-medium { border-style: dashed; }
+.badge.conf-low { border-style: dotted; font-style: italic; }
+.badge.design { border-color: var(--design); color: var(--design); }
+
+.body { padding: 0 var(--pad) var(--pad); border-top: 1px solid var(--rule); margin-top: 0.2rem; padding-top: 1rem; }
+
+.kv { margin: 0 0 1rem; display: grid; grid-template-columns: minmax(7.5rem, max-content) 1fr; gap: 0.3rem 1rem; font-size: 0.88rem; }
+.kv dt { color: var(--ink-faint); }
+.kv dd { margin: 0; }
+
+.claim { border-left: 3px solid var(--rule); padding: 0.15rem 0 0.15rem 0.85rem; color: var(--ink-soft); margin: 0 0 1rem; }
+.risk { border-left: 3px solid var(--danger); padding: 0.15rem 0 0.15rem 0.85rem; margin: 0 0 1rem; }
+.risk strong { color: var(--danger); }
+
+.cmd { margin-top: 0.5rem; }
+.cmd-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-faint); margin-bottom: 0.3rem; }
+.cmd-row { display: flex; gap: 0.5rem; align-items: stretch; }
+pre.cmd-text {
+  flex: 1; margin: 0; padding: 0.65rem 0.8rem; overflow-x: auto;
+  background: var(--neutral-soft); border-radius: 6px; font-size: 0.85rem;
+  white-space: pre-wrap; word-break: break-all;
+}
+button.copy {
+  border: 1px solid var(--rule); background: var(--panel); color: var(--ink);
+  border-radius: 6px; padding: 0 0.8rem; cursor: pointer; font-size: 0.8rem;
+  font-family: inherit; white-space: nowrap;
+}
+button.copy:hover { border-color: var(--ink-faint); }
+button.copy:focus-visible { outline: 2px solid var(--fallow); outline-offset: 2px; }
+
+.blocked { color: var(--ink-soft); font-size: 0.88rem; }
+
+/* ---------- notices ---------- */
+
+.notice {
+  border: 1px solid var(--rule); border-left: 3px solid var(--danger);
+  border-radius: 6px; padding: 0.8rem 1rem; margin-bottom: 1rem;
+  background: var(--panel);
+}
+.notice h3 { margin: 0 0 0.3rem; font-size: 0.92rem; }
+.notice p { margin: 0; color: var(--ink-soft); font-size: 0.88rem; }
+
+.footnote { color: var(--ink-faint); font-size: 0.8rem; margin-top: 0.75rem; }
+
+footer {
+  margin-top: 3.5rem; padding-top: 1.25rem; border-top: 1px solid var(--rule);
+  color: var(--ink-faint); font-size: 0.8rem;
+}
+footer p { margin: 0.3rem 0; }
+
+/* ---------- accessibility and motion ---------- */
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+
+/* High-contrast and forced-colours modes replace the palette entirely; keep
+ * the structure legible rather than fighting them for the colours. */
+@media (forced-colors: active) {
+  .panel, details.finding, .notice { border: 1px solid CanvasText; }
+  .swatch, .owner-fill { forced-color-adjust: none; }
+}
+
+/* ---------- print ---------- */
+
+@media print {
+  :root {
+    --bg: #fff; --panel: #fff; --ink: #000; --ink-soft: #333;
+    --ink-faint: #555; --rule: #bbb;
+  }
+  body { padding: 0; font-size: 11pt; }
+  button.copy, .filters { display: none !important; }
+  /* Evidence is the point of the document, so printing must not depend on
+   * whether the reader happened to expand it on screen. */
+  details.finding > .body { display: block !important; }
+  details.finding, section, tr, li { break-inside: avoid; page-break-inside: avoid; }
+  section { margin-top: 1.5rem; }
+  a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 9pt; color: #555; }
+}

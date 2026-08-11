@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="ullage {{.Version}}">
+<meta name="robots" content="noindex">
+<title>ullage — fallow accelerator capacity{{if .Context}} — {{.Context}}{{end}}</title>
+<style>{{.CSS}}</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1 class="wordmark">ullage <span class="tag">— the GPU your cluster paid for and didn't use</span></h1>
+  <ul class="meta">
+    {{if .Context}}<li>cluster <code>{{.Context}}</code></li>{{end}}
+    <li>window <code>{{.WindowLabel}}</code></li>
+    <li>scanned <code>{{.Started}}</code></li>
+    <li>ullage <code>{{.Version}}</code></li>
+    {{if .Prometheus}}<li>metrics <code>{{.Prometheus}}</code></li>{{end}}
+  </ul>
+  <p class="assurance">
+    <span>read-only scan</span>
+    <span>offline document</span>
+    <span>no telemetry</span>
+    {{if .Redacted}}<span>redacted</span>{{end}}
+  </p>
+</header>
+
+<!-- Headline -->
+{{if .Findings}}
+<div class="headline">
+  <div class="big">{{.Headline}} accelerator-hours fallow</div>
+  <div class="qualifier">
+    {{.HeadlineSub}} — {{.FallowPct}}% of the bill.
+    {{if .HasCost}}Worth <strong>{{.Cost}}</strong> at the rates below.{{end}}
+  </div>
+</div>
+{{else}}
+<div class="headline">
+  <div class="nothing">Nothing to reclaim.</div>
+  <div class="qualifier">
+    No accelerator in this cluster held capacity without using it for the whole
+    {{.WindowLabel}} window. {{.HeadlineSub}}.
+  </div>
+</div>
+{{end}}
+
+{{if not .Ledger.Reconciles}}
+<div class="notice" role="alert">
+  <h3>Capacity reconciliation unavailable</h3>
+  <p>
+    The buckets below do not sum to the capacity paid for
+    ({{printf "%.1f" .Ledger.Discrepancy}} accelerator-hours out). Findings may
+    describe the same devices twice, so no proportional chart is drawn. The
+    individual findings are still shown, and the JSON output carries the
+    underlying numbers.
+  </p>
+</div>
+{{end}}
+
+<!-- Where the capacity went -->
+<section id="capacity">
+  <h2>Where the capacity went</h2>
+  <div class="panel">
+    <p class="lede">
+      Every accelerator-hour the cluster paid for during the window, sorted into
+      one bucket each. ullage removes what it cannot judge and what is empty on
+      purpose <em>before</em> it calls anything waste.
+    </p>
+
+    {{if .Ledger.Reconciles}}
+    <svg class="waterfall" viewBox="0 0 720 74" role="img"
+         aria-labelledby="capTitle capDesc" preserveAspectRatio="xMidYMid meet">
+      <title id="capTitle">Paid accelerator-hours by bucket</title>
+      <desc id="capDesc">
+        {{hours .Ledger.Paid}} accelerator-hours paid for in total.
+        {{range .Ledger.Rows}}{{hours .Hours}} {{.Label}}. {{end}}
+        The same figures appear in the table immediately below.
+      </desc>
+      <defs>
+        <pattern id="hatch" width="7" height="7" patternUnits="userSpaceOnUse"
+                 patternTransform="rotate(45)">
+          <rect width="7" height="7" fill="var(--design-soft)"/>
+          <line x1="0" y1="0" x2="0" y2="7" stroke="var(--design)" stroke-width="3"/>
+        </pattern>
+      </defs>
+      <rect class="track" x="0" y="8" width="720" height="34" rx="4"/>
+      {{$x := 0.0}}
+      {{range .Ledger.Rows}}
+        {{if gt .Hours 0.0}}
+        <rect class="{{rowClass .Key}}" x="{{printf "%.2f" $x}}" y="8"
+              width="{{printf "%.2f" .Width}}" height="34">
+          <title>{{.Label}} — {{hours .Hours}} accelerator-hours</title>
+        </rect>
+        {{$x = .Next}}
+        {{end}}
+      {{end}}
+      <rect x="0" y="8" width="720" height="34" rx="4" fill="none"
+            stroke="var(--rule)" stroke-width="1"/>
+      <text class="sub" x="0" y="60">0</text>
+      <text class="sub" x="720" y="60" text-anchor="end">{{hours .Ledger.Paid}} accelerator-hours paid</text>
+    </svg>
+    {{end}}
+
+    <table>
+      <caption class="visually-hidden">Paid accelerator-hours by bucket</caption>
+      <thead>
+        <tr>
+          <th scope="col">Bucket</th>
+          <th scope="col" class="num">Accelerators</th>
+          <th scope="col" class="num">Hours</th>
+          <th scope="col" class="num">Share</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Ledger.Rows}}
+        <tr>
+          <td>
+            <span class="swatch {{swatch .Key}}" aria-hidden="true"></span>{{.Label}}
+            <span class="rownote">{{.Note}}</span>
+          </td>
+          <td class="num">{{if gt .Accelerators 0}}{{.Accelerators}}{{else}}—{{end}}</td>
+          <td class="num">{{hours .Hours}}</td>
+          <td class="num">{{.SharePct}}</td>
+        </tr>
+        {{end}}
+        <tr class="total">
+          <td>Paid capacity</td>
+          <td class="num">{{.Observed}}</td>
+          <td class="num">{{hours .Ledger.Paid}}</td>
+          <td class="num">100%</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p class="footnote">
+      &ldquo;Unflagged&rdquo; is a remainder, not a
+      measurement: ullage counts fallow hours, not productive ones, so an hour
+      in that row may be real work or may be idleness too short to report.
+    </p>
+  </div>
+</section>
+
+<!-- Evidence quality -->
+{{if or .Exclusions .Warnings .HasCovers .UnmetDemand}}
+<section id="evidence">
+  <h2>What this scan could not see</h2>
+  <div class="panel">
+    {{if .HasCovers}}
+    <p class="lede">
+      The sparsest series behind a finding covered <strong>{{.Coverage}}</strong>
+      of the samples the window should have contained. Missing samples are never
+      read as zeroes: a dead exporter and an idle fleet look identical, so
+      confidence drops instead.
+    </p>
+    {{end}}
+
+    {{if .Exclusions}}
+    <table>
+      <caption class="visually-hidden">Accelerators excluded from analysis</caption>
+      <thead>
+        <tr>
+          <th scope="col">Code</th>
+          <th scope="col">Excluded</th>
+          <th scope="col" class="num">Accelerators</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Exclusions}}
+        <tr>
+          <td><code>{{.Code}}</code></td>
+          <td>{{.Detail}}{{if .Remedy}}<span class="rownote">{{.Remedy}}</span>{{end}}</td>
+          <td class="num">{{.Accelerators}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{end}}
+
+    {{if .UnmetDemand}}
+    <p class="footnote">
+      <strong>{{.UnmetDemand.Accelerators}} accelerators are being waited on.</strong>
+      {{.UnmetDemand.Detail}}. Capacity released here has somewhere to go.
+    </p>
+    {{end}}
+
+    {{range .Warnings}}<p class="footnote">⚠ {{.}}</p>{{end}}
+  </div>
+</section>
+{{end}}
+
+<!-- Reserved by policy -->
+{{if .ByDesign}}
+<section id="by-design">
+  <h2>Empty on purpose</h2>
+  <div class="panel">
+    <p class="lede">
+      Capacity held idle deliberately — an autoscaler floor, a reservation, a
+      warm pool. It is listed so the decision stays visible, and it is excluded
+      from every total above. It is not waste.
+    </p>
+    {{range .ByDesign}}
+    <details class="finding">
+      <summary>
+        <span class="rank" aria-hidden="true">—</span>
+        <span>
+          <span class="subject">{{.Subject}}<span class="kindtag">{{.Kind}}</span></span>
+          <span class="subject-sub">{{.SubjectSub}}</span>
+          <span class="badges">
+            <span class="badge design">reserved by policy</span>
+            <span class="badge">excluded from waste</span>
+          </span>
+        </span>
+        <span class="figures">
+          {{if .HasCost}}<span class="cost">{{.Cost}}</span>{{end}}
+          <span class="hrs">{{.Hours}} acc-h</span>
+        </span>
+      </summary>
+      <div class="body">
+        {{if .Because}}<p class="claim">{{.Because}}</p>{{end}}
+        <dl class="kv">
+          <dt>Accelerators</dt><dd>{{.Accelerators}}</dd>
+          <dt>Idle for</dt><dd>{{.Fallow}} of {{.Window}}</dd>
+          {{if .Owner}}<dt>Owner</dt><dd>{{.Owner}}{{if .OwnerVia}} <span class="rownote">via {{.OwnerVia}}</span>{{end}}</dd>{{end}}
+        </dl>
+      </div>
+    </details>
+    {{end}}
+  </div>
+</section>
+{{end}}
+
+<!-- Owners -->
+{{if .Owners}}
+<section id="owners">
+  <h2>Who is holding it</h2>
+  <div class="panel">
+    <p class="lede">
+      Fallow accelerator-hours grouped by the owner ullage resolved, ranked by
+      {{.OwnerMeasure}}. This ranks opportunities, not people: the largest bar
+      is usually the easiest conversation, not the worst offender.
+    </p>
+    <ul class="owners">
+      {{range .Owners}}
+      <li>
+        <div class="owner-head">
+          <span class="owner-name">{{.Name}}</span>
+          <span class="owner-fig">
+            {{.Hours}} acc-h{{if .HasCost}} · {{.Cost}}{{end}} · {{.Count}} finding{{if ne .Count 1}}s{{end}}
+          </span>
+        </div>
+        <div class="owner-track">
+          <div class="owner-fill" style="width:{{pct .Share}}"></div>
+        </div>
+      </li>
+      {{end}}
+    </ul>
+    {{if .OwnersOmitted}}
+    <p class="footnote">
+      {{.OwnersOmitted}} further owner{{if ne .OwnersOmitted 1}}s{{end}} not
+      charted. Every one of them appears in the findings below.
+    </p>
+    {{end}}
+  </div>
+</section>
+{{end}}
+
+<!-- Findings -->
+{{if .Findings}}
+<section id="findings">
+  <h2>Findings</h2>
+  <p class="lede">
+    Ranked by what they cost, not by how idle they look. Open one for the
+    evidence behind the claim, what it deliberately stops short of saying, and
+    the command that frees the capacity.
+  </p>
+  {{range .Findings}}
+  <details class="finding" id="{{.Anchor}}">
+    <summary>
+      <span class="rank">{{.Rank}}</span>
+      <span>
+        <span class="subject">{{.Subject}}<span class="kindtag">{{.Kind}}</span></span>
+        <span class="subject-sub">{{.SubjectSub}}</span>
+        <span class="badges">
+          <span class="badge">{{.CheckLabel}}</span>
+          <span class="badge {{.ConfClass}}">{{.Confidence}} confidence</span>
+          {{if .Owner}}<span class="badge">{{.Owner}}</span>{{end}}
+          {{if not .Command}}<span class="badge">no safe command</span>{{end}}
+        </span>
+      </span>
+      <span class="figures">
+        {{if .HasCost}}<span class="cost">{{.Cost}}</span>{{end}}
+        <span class="hrs">{{.Hours}} acc-h</span>
+      </span>
+    </summary>
+
+    <div class="body">
+      <dl class="kv">
+        <dt>Accelerators</dt><dd>{{.Accelerators}}</dd>
+        <dt>Idle for</dt><dd>{{.Fallow}} of a {{.Window}} window</dd>
+        <dt>Last did work</dt><dd>{{.LastSeen}}</dd>
+        <dt>Peak utilization</dt><dd>{{.UtilMax}} — the highest sample, not the mean</dd>
+        {{if .Power}}<dt>Power draw</dt><dd>{{.Power}}</dd>{{end}}
+        <dt>Sample coverage</dt><dd>{{.Completeness}}</dd>
+        {{if .Owner}}<dt>Owner</dt><dd>{{.Owner}}{{if .OwnerVia}} <span class="rownote">resolved via {{.OwnerVia}}</span>{{end}}</dd>{{end}}
+        <dt>Ownership</dt><dd>{{.Ownership}}</dd>
+        {{if .Controller}}<dt>Controlled by</dt><dd><code>{{.Controller}}</code></dd>{{end}}
+        {{if .ShowChain}}<dt>Owner chain</dt><dd>{{range $i, $c := .Chain}}{{if $i}} → {{end}}<code>{{$c}}</code>{{end}}</dd>{{end}}
+      </dl>
+
+      {{range .Notes}}<p class="claim">{{.}}</p>{{end}}
+
+      {{if .Risk}}
+      <p class="risk"><strong>Before you run this.</strong> {{.Risk}}</p>
+      {{end}}
+
+      {{if .Blockers}}
+      <p class="cmd-label">What is holding it</p>
+      <table>
+        <tbody>
+          {{range .Blockers}}
+          <tr><td><code>{{.Object}}</code></td><td>{{.Reason}}</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{end}}
+
+      {{if .Command}}
+      <div class="cmd">
+        <div class="cmd-label">
+          Frees {{.Targets}}{{if .Frees}} — {{.Frees}}{{end}}
+        </div>
+        <div class="cmd-row">
+          <pre class="cmd-text" id="{{.CommandID}}">{{.Command}}</pre>
+          <button class="copy" type="button" data-for="{{.CommandID}}" hidden>copy</button>
+        </div>
+        {{if .Rationale}}<p class="footnote">{{.Rationale}}</p>{{end}}
+      </div>
+      {{else}}
+      <p class="blocked">
+        No command is offered here. {{if .Rationale}}{{.Rationale}}{{else}}ullage
+        emits one only where it knows the removal semantics of the owning
+        controller.{{end}}
+      </p>
+      {{end}}
+    </div>
+  </details>
+  {{end}}
+</section>
+{{end}}
+
+<!-- Suppressed -->
+{{if .Suppressed}}
+<section id="suppressed">
+  <h2>Suppressed</h2>
+  <div class="panel">
+    <p class="lede">
+      Silenced by <code>.ullage.yaml</code>, and still counted in the ledger
+      above. A suppression hides a finding from the ranking, not the capacity
+      from the bill.
+    </p>
+    <ul class="owners">
+      {{range .Suppressed}}
+      <li>
+        <div class="owner-head">
+          <span class="owner-name">{{.Subject}}</span>
+          <span class="owner-fig">{{.Hours}} acc-h{{if .HasCost}} · {{.Cost}}{{end}}</span>
+        </div>
+        {{if .Because}}<span class="rownote">{{.Because}}</span>{{end}}
+      </li>
+      {{end}}
+    </ul>
+  </div>
+</section>
+{{end}}
+
+<footer>
+  <p><strong>How to read this.</strong>
+    ullage measures accelerator-hours that were paid for and did no work. It does
+    not measure efficiency, and a low utilization figure is not a finding here —
+    only capacity that did nothing at all for longer than the threshold.</p>
+  {{if .PricingSource}}
+  <p><strong>Money.</strong> {{.PricingSource}}. Costs are estimates of what the
+    unused capacity was billed at, not savings that will appear on an invoice;
+    releasing capacity only saves money if the underlying node goes away.</p>
+  {{end}}
+  <p><strong>Thresholds.</strong>
+    idle ≥ {{.Params.IdleThreshold}}, stuck ≥ {{.Params.StuckThreshold}},
+    step {{.Params.Step}}, minimum confidence {{.MinConfidence}}.</p>
+  <p>Generated {{.Generated}} by ullage {{.Version}}. This document made no
+    network request to render, and contains no tracking of any kind.</p>
+</footer>
+
+</div>
+<script>{{.JS}}</script>
+</body>
+</html>
