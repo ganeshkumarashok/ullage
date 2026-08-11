@@ -1,7 +1,8 @@
 package render
 
 import (
-	"fmt"
+	"sort"
+	"strconv"
 
 	"github.com/ullage-project/ullage/pkg/ullage/api"
 )
@@ -153,12 +154,16 @@ func BuildLedger(res *api.Result) Ledger {
 	l.Discrepancy = sum - l.Paid
 
 	var x float64
+	shares := make([]float64, len(l.Rows))
 	for i := range l.Rows {
 		share := l.Share(l.Rows[i])
+		shares[i] = share
 		l.Rows[i].Width = share * ledgerBarWidth
 		x += l.Rows[i].Width
 		l.Rows[i].Next = x
-		l.Rows[i].SharePct = formatShare(share)
+	}
+	for i, pct := range apportion(shares) {
+		l.Rows[i].SharePct = pct
 	}
 
 	// A tolerance rather than an equality test: these are floating-point hour
@@ -200,18 +205,58 @@ func (l Ledger) Deductions() []LedgerRow {
 // ledgerBarWidth is the conservation bar's width in SVG viewBox units.
 const ledgerBarWidth = 720.0
 
-// formatShare keeps a bucket that exists from rounding away to nothing: "0%"
-// against a non-zero hour count in the next column reads as a contradiction.
-func formatShare(share float64) string {
-	pct := share * 100
-	switch {
-	case pct == 0:
-		return "0%"
-	case pct < 0.5:
-		return "<1%"
-	default:
-		return fmt.Sprintf("%.0f%%", pct)
+// apportion renders shares as whole percentages that add up to exactly 100.
+//
+// Rounding each share on its own is the obvious thing and it is wrong here.
+// Five buckets that individually round up land on 101%, directly beneath a
+// total row that says 100% — on the one table in the document whose entire
+// purpose is to show that the headline figure equals the sum of its parts.
+// A reader who spots that has been handed a reason to disbelieve everything
+// else, and they would be right to look.
+//
+// So the whole percentages are allocated by largest remainder: floor
+// everything, then hand the leftover points to the buckets that lost the most
+// in the flooring. The result is off by at most one point on any single row
+// and exact in the total, which is the right way round for a document that
+// asks to be checked.
+func apportion(shares []float64) []string {
+	out := make([]string, len(shares))
+	floors := make([]int, len(shares))
+	type rem struct {
+		i    int
+		frac float64
 	}
+	var rems []rem
+	allocated := 0
+
+	for i, share := range shares {
+		pct := share * 100
+		// A bucket that exists but rounds to nothing is shown as "<1%" rather
+		// than "0%", which beside a non-zero hour count reads as a
+		// contradiction. It takes no share of the rounding, having already
+		// been given more than its arithmetic due.
+		if pct > 0 && pct < 0.5 {
+			out[i] = "<1%"
+			continue
+		}
+		floors[i] = int(pct)
+		allocated += floors[i]
+		rems = append(rems, rem{i: i, frac: pct - float64(floors[i])})
+	}
+
+	// Ties broken by position so the same input always renders identically:
+	// the document is byte-compared in tests and read side by side by people.
+	sort.SliceStable(rems, func(a, b int) bool { return rems[a].frac > rems[b].frac })
+	for n := 0; n < 100-allocated && n < len(rems); n++ {
+		floors[rems[n].i]++
+	}
+
+	for i := range out {
+		if out[i] == "" {
+			out[i] = strconv.Itoa(floors[i]) + "%"
+		}
+	}
+	return out
 }
 
 func sumFindings(fs []api.Finding) (hours float64, accelerators int) {

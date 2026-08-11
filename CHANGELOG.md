@@ -818,6 +818,20 @@ escalate that does not disclose the vulnerability.
 `CONTRIBUTING.md` mandates a DCO sign-off that none of the 53 commits before it
 carry and that nothing in CI enforces.
 
+### The ledger's own percentages did not add up
+
+Found by rendering the report and reading it. The shares came to 39 + 12 + 24
++ 0 + 26 = 101%, printed directly above a total row saying 100% — on the one
+table in the document whose entire purpose is to show that the headline equals
+the sum of its parts. Each share was rounded on its own, which is the obvious
+approach and the wrong one.
+
+Whole percentages are now allocated by largest remainder: floor everything,
+then give the leftover points to the buckets that lost most in the flooring.
+Off by at most one point on any row, exact in the total, which is the right way
+round for a document that asks to be checked. A bucket holding real hours still
+shows "<1%" rather than "0%".
+
 ### Failed attempts
 
 - Mutation-testing the "deleted owner is not a permissions gap" test passed

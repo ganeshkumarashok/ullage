@@ -1,6 +1,7 @@
 package render
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -211,4 +212,61 @@ func lower(s string) string {
 		}
 	}
 	return string(out)
+}
+
+// The ledger is the one table in the document whose whole purpose is to show
+// that the headline equals the sum of its parts. Rounding each share on its
+// own puts 39 + 12 + 24 + 0 + 26 = 101% directly above a total row reading
+// 100%, and a reader who notices has been handed a reason to disbelieve
+// everything else on the page.
+func TestLedgerSharesAddUpToExactlyOneHundred(t *testing.T) {
+	// The proportions the demo cluster actually produces, which is where the
+	// 101% was found.
+	for _, shares := range [][]float64{
+		{8928.0 / 22848, 2688.0 / 22848, 5376.0 / 22848, 0, 5856.0 / 22848},
+		{1.0 / 3, 1.0 / 3, 1.0 / 3},
+		{0.5, 0.5},
+		{1},
+		{0.985, 0.005, 0.005, 0.005},
+	} {
+		total, approx := 0, false
+		var displayed []string
+		for _, pct := range apportion(shares) {
+			displayed = append(displayed, pct)
+			if pct == "<1%" {
+				// Deliberately not whole, and already rounded up: the row
+				// takes no part in the exact total.
+				approx = true
+				continue
+			}
+			var n int
+			if _, err := fmt.Sscanf(pct, "%d%%", &n); err != nil {
+				t.Fatalf("share %q is not a whole percentage", pct)
+			}
+			total += n
+		}
+		switch {
+		case approx && total > 100:
+			t.Errorf("shares %v render as %v, summing to %d%% — above a total row that "+
+				"says 100%%.", shares, displayed, total)
+		case !approx && total != 100:
+			t.Errorf("shares %v render as %v, summing to %d%% under a total row that says "+
+				"100%%. The parts must add up on the one table that exists to prove the "+
+				"headline equals the sum of its parts — in either direction, since a "+
+				"reader checking the arithmetic finds 99%% exactly as fast as 101%%.",
+				shares, displayed, total)
+		}
+	}
+}
+
+// A bucket holding real hours must never render as "0%": beside a non-zero
+// hour count in the next column it reads as a contradiction, and the fix for
+// the sum is not allowed to reintroduce it.
+func TestATinyButRealBucketIsNeverShownAsZero(t *testing.T) {
+	got := apportion([]float64{0.9994, 0.0006})
+	if got[1] != "<1%" {
+		t.Fatalf("share of 0.06%% rendered as %q, want \"<1%%\": rounding a bucket that "+
+			"holds real accelerator-hours down to nothing invites the reader to "+
+			"ignore it.", got[1])
+	}
 }
