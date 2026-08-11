@@ -1,5 +1,67 @@
 # Changelog
 
+## Cold third-party review, and the arithmetic it found
+
+Goal: have two reviewers with no context read the repository the way a stranger
+would -- one as a skeptical infra engineer with thirty minutes, one as a Go
+engineer deciding whether to depend on it -- and fix what they found before
+publishing.
+
+Findings that were real, reproduced before being fixed:
+
+- **Paid accelerator-hours ignored node age.** The figure was `accelerators now
+  x window`, so a node created an hour ago was billed for the whole fourteen
+  days. That number is the denominator of the headline percentage and the base
+  of the ledger, and GPU clusters autoscale. Now summed per node as
+  `min(age, window) x accelerators`. The not-analysed bucket moved to the same
+  basis, because deriving the two independently lets a subset exceed the set
+  and drives the ledger residual negative. Demo headline moved 23k -> 22k.
+- **`--min-confidence` failed open.** An unrecognised level was read as Go's
+  zero value, which is the *most permissive* bar, so `--min-confidence Medium`
+  was looser than `high` and published the low-confidence findings the operator
+  thought they had filtered out. Now validated, case-insensitive, and unknown
+  reads as strictest inside `pkg/ullage`.
+- **The README broke on the third command a reader types.** It showed
+  `ullage explain` two commands after `make demo`, which only builds
+  `./bin/ullage`.
+- **The README headline had already drifted** and nothing caught it: only the
+  explain transcript was pinned, and `make check` asserted the demo *exits*
+  cleanly, never that it printed what the front page claims.
+- `--metrics-selector` was documented in the README and missing from `--help`.
+- `CONTRIBUTING.md` said "implement three methods" and listed two, so the
+  snippet a new contributor copies did not compile. It also never mentioned
+  that a check needs a docs page and an index link, both of which the tests
+  enforce.
+- Comments and a test described concurrent owner resolution. There is not a
+  single goroutine in non-test code; the lock guards the `pkg/ullage` contract,
+  and now says so.
+- `app.kubernetes.io/managed-by` was an owner fallback. It names the deploying
+  *tool*, so on a GitOps cluster "the person responsible" resolved to `helm`.
+- Built-in prices had no stated provenance; a dead field tripped staticcheck.
+
+Every fix is mutation-proven: the fix was reverted and the new test confirmed
+to fail with the intended message. Two claims from the reviews were checked and
+not acted on -- the tests were found to be load-bearing under mutation, and no
+arithmetic bug was found in the core.
+
+Failed attempt worth recording: the first pass at the paid-hours fix changed
+only the scan total and left the ledger deriving not-analysed hours from
+`accelerators x window`. On a cluster that had recently scaled up, that made a
+bucket larger than the capacity it subdivides. Both had to move together.
+
+Files changed: `internal/inventory/inventory.go`, `internal/scan/analyse.go`,
+`internal/scan/gather.go`, `internal/scan/provenance.go`,
+`internal/render/ledger.go`, `internal/kube/client.go`, `pkg/ullage/api/api.go`,
+`cmd/ullage/main.go`, `internal/pricing/default.yaml`, `internal/demo/server.go`,
+`README.md`, `CONTRIBUTING.md`, `docs/hero.svg`, and tests alongside each.
+
+Also moved the module path to `github.com/ganeshkumarashok/ullage`, since the
+`ullage-project` org was never created and an import path that does not resolve
+breaks `go install` for everyone.
+
+Next: publish, then watch the first CI run -- nothing in `.github/workflows/`
+has ever executed.
+
 ## v0.1.0 — unreleased
 
 First working end-to-end release.
