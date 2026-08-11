@@ -63,6 +63,10 @@ type Gatherer struct {
 	// empty unless the reader can see and re-run the queries.
 	Trace bool
 
+	// Selector is a PromQL label matcher applied to every metric read, for the
+	// case where the endpoint holds more than this one cluster.
+	Selector string
+
 	queries []string
 }
 
@@ -126,7 +130,23 @@ func (g *Gatherer) Gather(ctx context.Context, opts Options) (*inventory.Cluster
 	}
 
 	opts.Progress(fmt.Sprintf("Querying GPU metrics over %s", opts.Window.Round(time.Hour)))
-	schema, err := g.Prom.DetectLabelSchema(ctx, MetricGPUUtil, end)
+	if strings.TrimSpace(g.Selector) == "" {
+		if label, values := g.detectMergedClusters(ctx, end); label != "" {
+			shown := values
+			if len(shown) > 4 {
+				shown = append(append([]string{}, shown[:4]...),
+					fmt.Sprintf("and %d more", len(values)-4))
+			}
+			warnings = append(warnings, fmt.Sprintf(
+				"the metrics endpoint holds more than one cluster (label %q has values %s), "+
+					"and the accelerators of this cluster cannot be told apart from theirs; "+
+					"node names are not unique across clusters, so a busy device elsewhere "+
+					"can answer for an idle one here. Pass --metrics-selector '%s=\"...\"' "+
+					"to name this cluster",
+				label, strings.Join(shown, ", "), label))
+		}
+	}
+	schema, err := g.Prom.DetectLabelSchema(ctx, g.sel(MetricGPUUtil), end)
 	if err != nil {
 		return nil, inv, warnings, err
 	}
@@ -321,7 +341,7 @@ const ScrapeInterval = 30 * time.Second
 func (g *Gatherer) measureScrapeInterval(ctx context.Context, end time.Time) (time.Duration, bool) {
 	const probe = time.Hour
 	samples, err := g.instant(ctx,
-		fmt.Sprintf("count_over_time(%s[%s])", MetricGPUUtil, promql.Range(probe)), end)
+		fmt.Sprintf("count_over_time(%s[%s])", g.sel(MetricGPUUtil), promql.Range(probe)), end)
 	if err != nil || len(samples) == 0 {
 		return ScrapeInterval, false
 	}
@@ -448,7 +468,7 @@ func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *
 		}
 	}
 
-	avgPower, _ := g.instant(ctx, fmt.Sprintf("avg_over_time(%s[%s])", MetricPower, promql.Range(powerWindow)), end)
+	avgPower, _ := g.instant(ctx, fmt.Sprintf("avg_over_time(%s[%s])", g.sel(MetricPower), promql.Range(powerWindow)), end)
 	samples, _, err := g.chunked(ctx, MetricGPUUtil, "count_over_time", schema, start, end, sumCombine)
 	if err != nil && ctx.Err() != nil {
 		return nil, false, nil, 0, ctx.Err()
@@ -457,13 +477,17 @@ func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *
 	// The sparkline and "when did work last happen" need shape, not precision,
 	// so they use one coarse range query at an hourly step: 336 points per
 	// series over a fortnight rather than four thousand.
-	shape, err := g.Prom.QueryRange(ctx, MetricGPUUtil, start, end, step)
+	shape, err := g.Prom.QueryRange(ctx, g.sel(MetricGPUUtil), start, end, step)
 	if err != nil {
 		shape = nil
 	}
 	if g.Trace {
+		// The traced query has to be the query. A trace that omits the selector
+		// is one a reader can paste and get a different answer from, which
+		// makes the evidence unverifiable in exactly the setup where the
+		// selector mattered.
 		g.queries = append(g.queries, fmt.Sprintf("%s @ range %s..%s step %s",
-			MetricGPUUtil, start.Format(time.RFC3339), end.Format(time.RFC3339), step))
+			g.sel(MetricGPUUtil), start.Format(time.RFC3339), end.Format(time.RFC3339), step))
 	}
 	// Keyed by series, not by device. A GPU held by two pods inside the window
 	// returns a series per holder, so a device-keyed map keeps whichever one
@@ -602,6 +626,54 @@ func refine(st *inventory.Stats, s promql.Series, start, end time.Time, step tim
 // the evidence rather than abort the scan. What is not tolerated is silence —
 // a chunk that fails reduces sample completeness, which the checks already
 // treat as a reason to lower confidence rather than to make a claim.
+// clusterLabels are the labels a metrics backend adds when it holds more than
+// one cluster. Prometheus itself writes none of them: they arrive from the
+// external_labels of a federated setup, or from the remote_write of a central
+// Thanos, Mimir or Grafana Cloud tenant.
+var clusterLabels = []string{"cluster", "cluster_name", "k8s_cluster_name", "prometheus", "source_cluster"}
+
+// sel applies the configured metric selector.
+//
+// Against a central store holding forty clusters, an unqualified metric name
+// returns all forty. Node names are not globally unique -- kubeadm and kind
+// both produce "gpu-worker-0" -- so a busy device in one cluster can answer for
+// an idle device of the same name in another, and the merge is silent.
+func (g *Gatherer) sel(metric string) string {
+	if strings.TrimSpace(g.Selector) == "" {
+		return metric
+	}
+	return metric + "{" + strings.TrimSpace(g.Selector) + "}"
+}
+
+// detectMergedClusters reports the cluster-identifying label, if any, that
+// carries more than one value in the metric being read.
+//
+// This is the only chance to notice. Once the samples are joined to nodes, a
+// foreign device either vanishes -- taking its evidence with it -- or answers
+// for a local node of the same name, and neither leaves a trace.
+func (g *Gatherer) detectMergedClusters(ctx context.Context, at time.Time) (label string, values []string) {
+	samples, err := g.Prom.QueryExpr(ctx, g.sel(MetricGPUUtil), at)
+	if err != nil || len(samples) == 0 {
+		return "", nil
+	}
+	for _, l := range clusterLabels {
+		seen := map[string]bool{}
+		for _, s := range samples {
+			if v := strings.TrimSpace(s.Labels[l]); v != "" {
+				seen[v] = true
+			}
+		}
+		if len(seen) > 1 {
+			for v := range seen {
+				values = append(values, v)
+			}
+			sort.Strings(values)
+			return l, values
+		}
+	}
+	return "", nil
+}
+
 func (g *Gatherer) chunked(
 	ctx context.Context, metric, fn string, schema promql.LabelSchema, start, end time.Time,
 	combine func(a, b float64) float64,
@@ -618,7 +690,7 @@ func (g *Gatherer) chunked(
 			span = rem
 		}
 		total += span
-		q := fmt.Sprintf("%s(%s[%s])", fn, metric, promql.Range(span))
+		q := fmt.Sprintf("%s(%s[%s])", fn, g.sel(metric), promql.Range(span))
 		got, err := g.instant(ctx, q, at)
 		if err != nil {
 			// Cancellation is not a gap in the data, it is the end of the

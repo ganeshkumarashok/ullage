@@ -345,11 +345,11 @@ in the cluster to `dcgm-exporter`.
 |---|---|
 | NVIDIA, `dcgm-exporter` | Supported |
 | Exclusive whole-device allocation | Supported |
-| DRA (`resource.k8s.io`, GA in 1.34) | Supported — claims reserve whole devices, so exclusivity holds |
+| DRA (`resource.k8s.io`, GA in 1.34) | Supported — claims are filtered by driver, so a NIC claim is not counted as a GPU, and a claim shared between pods is counted once |
 | cluster-autoscaler | Supported, including a pool spread across zonal node groups |
 | Karpenter | Supported — NodePools, zero-node disruption budgets, `karpenter.sh/do-not-disrupt` |
-| Thanos, Mimir, Cortex, Grafana Agent | Should work; anything speaking the Prometheus query API |
-| MIG, time-slicing, MPS | **Counted and named, never analysed.** Device-level utilization cannot separate co-tenants |
+| Thanos, Mimir, Cortex, Grafana Agent | Should work; anything speaking the Prometheus query API. If the endpoint holds more than one cluster, pass `--metrics-selector 'cluster="prod-eastus"'` — node names are not unique across clusters, and `ullage` warns rather than merging them silently |
+| MIG, time-slicing, MPS | **Counted and named, never analysed.** Device-level utilization cannot separate co-tenants. Both MIG strategies are detected, including `single`, where instances are advertised as whole `nvidia.com/gpu` |
 | AMD, Intel, Habana | **Discovered, not measured.** Their accelerators are counted and attributed, but no metric source is wired up, so they land in the exclusions |
 | Amazon Managed Prometheus, Azure Monitor, Google Managed Prometheus | **Not directly.** These need SigV4 signing or AAD token exchange. Point `ullage` at a signing proxy, or supply a token with `--prometheus-token-file`, which is re-read on every request so a rotating projected token keeps working |
 

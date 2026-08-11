@@ -43,6 +43,11 @@ type Options struct {
 	// the default path explicitly and an embedder opts in.
 	ConfigFile string
 
+	// MetricsSelector is a PromQL label matcher applied to every metric read.
+	// It is required when the endpoint holds more than one cluster, because
+	// node names are not unique across clusters.
+	MetricsSelector string
+
 	// Trace records the exact queries issued, so a caller can show its users
 	// how a claim was reached.
 	Trace bool
@@ -137,7 +142,7 @@ func Scan(ctx context.Context, opts Options) (*api.Result, error) {
 	}
 	so.Defaults()
 
-	g := &scan.Gatherer{Kube: kc, Prom: pc, Trace: opts.Trace}
+	g := &scan.Gatherer{Kube: kc, Prom: pc, Trace: opts.Trace, Selector: opts.MetricsSelector}
 	cluster, inv, warnings, err := g.Gather(ctx, so)
 	if err != nil {
 		return nil, err

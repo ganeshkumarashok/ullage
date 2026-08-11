@@ -180,6 +180,7 @@ type flags struct {
 	kubeContext   string
 	apiServer     string
 	promURL       string
+	metricsSel    string
 	promAuth      string
 	promToken     string
 	promTokenFile string
@@ -222,6 +223,9 @@ func newFlags(name string) *flags {
 	f.fs.StringVar(&f.kubeContext, "context", "", "kubeconfig context")
 	f.fs.StringVar(&f.apiServer, "api-server", "", "Kubernetes API URL, bypassing kubeconfig")
 	f.fs.StringVar(&f.promURL, "prometheus", "", "Prometheus-compatible query endpoint")
+	f.fs.StringVar(&f.metricsSel, "metrics-selector", "",
+		"PromQL label matcher naming this cluster, e.g. cluster=\"prod-eastus\" "+
+			"(required when the endpoint holds more than one cluster)")
 	f.fs.StringVar(&f.promAuth, "prometheus-auth", "", "none | bearer | basic")
 	f.fs.StringVar(&f.promToken, "prometheus-token", "", "bearer token")
 	f.fs.StringVar(&f.promTokenFile, "prometheus-token-file", "", "file containing a bearer token")
@@ -292,17 +296,18 @@ func (f *flags) options() (ullage.Options, error) {
 			TokenFile: f.promTokenFile, Username: f.promUser, Password: f.promPass,
 			Headers: headers, Timeout: f.timeout, Insecure: f.insecure,
 		},
-		Window:         f.window,
-		IdleThreshold:  f.idle,
-		StuckThreshold: f.stuck,
-		Step:           f.step,
-		MinConfidence:  f.minConfidence,
-		Namespaces:     f.namespaces,
-		Checks:         checks,
-		Pricing:        prices,
-		ConfigFile:     f.config,
-		Trace:          f.trace || f.explainQ,
-		Version:        version,
+		Window:          f.window,
+		IdleThreshold:   f.idle,
+		StuckThreshold:  f.stuck,
+		Step:            f.step,
+		MinConfidence:   f.minConfidence,
+		Namespaces:      f.namespaces,
+		Checks:          checks,
+		Pricing:         prices,
+		ConfigFile:      f.config,
+		MetricsSelector: f.metricsSel,
+		Trace:           f.trace || f.explainQ,
+		Version:         version,
 	}, nil
 }
 
