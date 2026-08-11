@@ -106,6 +106,13 @@ type Container struct {
 	Name      string               `json:"name"`
 	Image     string               `json:"image"`
 	Resources ResourceRequirements `json:"resources"`
+
+	// RestartPolicy is set only on init containers, and only to "Always",
+	// which is how Kubernetes spells a sidecar. It changes the arithmetic: a
+	// sidecar runs alongside the app containers and its request adds to
+	// theirs, while an ordinary init container runs before them and its
+	// request is a maximum, not an addition.
+	RestartPolicy string `json:"restartPolicy,omitempty"`
 }
 
 type PodResourceClaim struct {
@@ -184,16 +191,58 @@ type Pod struct {
 // Init containers are excluded: their requests are maxed, not summed, and they
 // do not add to the pod's steady-state allocation.
 func (p *Pod) GPURequest() (int, string) {
-	total, resource := 0, ""
-	for _, c := range p.Spec.Containers {
+	return effectiveRequest(p, func(c Container) (int, string) {
 		n, res := c.Resources.Limits.GPUs()
 		if n == 0 {
 			n, res = c.Resources.Requests.GPUs()
 		}
+		return n, res
+	})
+}
+
+// effectiveRequest applies Kubernetes' effective pod resource request:
+//
+//	max( sum(app containers) + sum(sidecars), max(init containers) )
+//
+// Init containers were previously ignored entirely, so a pod whose accelerator
+// is requested only by an init container -- the ordinary shape of a job that
+// downloads model weights before training -- reported zero accelerators. It
+// was then skipped by the node occupancy scan, because a pod that holds
+// nothing cannot make a node busy, and skipped by stuck-pod, because a pod
+// that holds nothing cannot be stuck holding one.
+//
+// Which is to say: a pod wedged in an init container, holding a GPU it will
+// not release, was invisible to the check written to find exactly that, and
+// the node under it was offered up for deletion.
+func effectiveRequest(p *Pod, of func(Container) (int, string)) (int, string) {
+	total, resource := 0, ""
+	take := func(n int, res string) {
 		if n > 0 {
 			total += n
-			resource = res
+			if resource == "" {
+				resource = res
+			}
 		}
+	}
+	for _, c := range p.Spec.Containers {
+		take(of(c))
+	}
+
+	// Sidecars never terminate, so they add. Ordinary init containers run one
+	// at a time and finish, so the pod's floor is the largest of them.
+	initMax, initRes := 0, ""
+	for _, c := range p.Spec.InitContainers {
+		n, res := of(c)
+		if c.RestartPolicy == "Always" {
+			take(n, res)
+			continue
+		}
+		if n > initMax {
+			initMax, initRes = n, res
+		}
+	}
+	if initMax > total {
+		return initMax, initRes
 	}
 	return total, resource
 }
@@ -205,20 +254,13 @@ func (p *Pod) GPURequest() (int, string) {
 // as a whole A100. "Is this node in use?" must count it, or an entire MIG pool
 // running at capacity is reported as empty and recommended for deletion.
 func (p *Pod) SliceRequest() (int, string) {
-	total, resource := 0, ""
-	for _, c := range p.Spec.Containers {
+	return effectiveRequest(p, func(c Container) (int, string) {
 		n, res := c.Resources.Limits.Slices()
 		if n == 0 {
 			n, res = c.Resources.Requests.Slices()
 		}
-		if n > 0 {
-			total += n
-			if resource == "" {
-				resource = res
-			}
-		}
-	}
-	return total, resource
+		return n, res
+	})
 }
 
 // UsesDRA reports whether the pod obtains devices through ResourceClaims. Under
@@ -241,8 +283,12 @@ func (p *Pod) Controller() *OwnerReference {
 }
 
 // WedgedReason returns a description of why a pod is stuck holding a device,
-// plus the terminated state that explains it. Pending is deliberately not a
-// wedged state: a Pending pod holds nothing.
+// plus the terminated state that explains it.
+//
+// The phase is deliberately not consulted. A pod bound to a node and wedged on
+// ImagePullBackOff is phase Pending and is holding an accelerator the
+// scheduler has already committed to it; whether it holds anything is decided
+// by whether it is bound, not by its phase.
 func (p *Pod) WedgedReason() (string, *StateTerminated) {
 	all := append(append([]ContainerStatus{}, p.Status.ContainerStatuses...), p.Status.InitContainerStatuses...)
 	for _, cs := range all {

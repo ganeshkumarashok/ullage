@@ -269,3 +269,38 @@ func TestEnrichFallsBackToTheProductWhenNoTotalIsGiven(t *testing.T) {
 		t.Fatalf("GPUHoursFallow = %.0f, want 96 from two devices times 48h", got)
 	}
 }
+
+// The fact layer is where "Pending" is decided, and it used to mean "phase
+// Pending OR unscheduled". Those are opposite claims about whether hardware is
+// held: a pod bound to a node and wedged on ImagePullBackOff is phase Pending
+// and the scheduler has already committed that node's accelerator to it.
+//
+// The check-level tests assert what the checks do with a correct fact. This
+// asserts the fact, because the checks cannot be right about a pod the fact
+// layer has already mislabelled.
+func TestBoundPendingPodIsNotReportedAsUnscheduled(t *testing.T) {
+	api := &fakeAPI{phase: "Pending", waiting: "ImagePullBackOff"}
+	g, opts, _ := gatherAgainst(t, api)
+
+	cl, _, _, err := g.Gather(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if len(cl.Pods) != 1 {
+		t.Fatalf("got %d pods, want 1", len(cl.Pods))
+	}
+	p := cl.Pods[0]
+
+	if p.Node == "" {
+		t.Fatal("the fixture pod has a nodeName; the test is not exercising a bound pod")
+	}
+	if p.Pending {
+		t.Fatal("a pod the scheduler bound to a node and which is wedged in " +
+			"ImagePullBackOff was reported as pending, which means 'holds nothing'. " +
+			"unused-node then reads its node as empty and offers to delete hardware " +
+			"Kubernetes considers full, while stuck-pod skips the one pod it exists to find")
+	}
+	if p.WedgedReason != "ImagePullBackOff" {
+		t.Fatalf("WedgedReason = %q, want ImagePullBackOff", p.WedgedReason)
+	}
+}

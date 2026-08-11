@@ -26,6 +26,13 @@ type fakeAPI struct {
 
 	denyPDBs   bool
 	deniedPDBs bool
+
+	// phase overrides the pod's phase, and waiting puts its container in a
+	// waiting state with that reason. Together they describe a pod the
+	// scheduler has bound to a node which has not started: phase Pending,
+	// nodeName set, ImagePullBackOff.
+	phase   string
+	waiting string
 }
 
 func (f *fakeAPI) handler(t *testing.T) http.Handler {
@@ -86,9 +93,26 @@ func (f *fakeAPI) handler(t *testing.T) http.Handler {
 				"spec": map[string]any{
 					"nodeName":       node,
 					"resourceClaims": []any{map[string]any{"name": "gpu", "resourceClaimName": "gpu-claim"}},
-					"containers":     []any{map[string]any{"name": "train"}},
+					"containers": []any{map[string]any{
+						"name": "train",
+						"resources": map[string]any{
+							"limits": map[string]any{"nvidia.com/gpu": "1"},
+						},
+					}},
 				},
-				"status": map[string]any{"phase": "Running"},
+				"status": func() map[string]any {
+					st := map[string]any{"phase": "Running"}
+					if f.phase != "" {
+						st["phase"] = f.phase
+					}
+					if f.waiting != "" {
+						st["containerStatuses"] = []any{map[string]any{
+							"name":  "train",
+							"state": map[string]any{"waiting": map[string]any{"reason": f.waiting}},
+						}}
+					}
+					return st
+				}(),
 			})
 
 		case strings.HasSuffix(path, "/nodes"):

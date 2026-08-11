@@ -684,10 +684,22 @@ func (g *Gatherer) podView(ctx context.Context, r *Resolver, p *kube.Pod, nsByNa
 		Restarts:     p.RestartCount(),
 		WedgedReason: reason,
 		Initialising: initialising(p),
-		Pending:      p.Status.Phase == "Pending" || p.Spec.NodeName == "",
-		Provenance:   prov,
-		Owner:        AttributeOwner(p, ctrl, nsByName[p.Metadata.Namespace]),
-		Labels:       p.Metadata.Labels,
+		// Not scheduled -- which is not the same as phase Pending.
+		//
+		// A pod bound to a node and stuck in ImagePullBackOff is phase
+		// Pending, and the scheduler has already committed that node's
+		// accelerator to it: nothing else can be placed there. Treating it as
+		// pending made the node look empty to unused-node and made the pod
+		// invisible to stuck-pod, so a node wedged on a bad image tag was
+		// reported as reclaimable -- and the pod holding it, which is exactly
+		// the waste this tool exists to find, was reported as nothing at all.
+		//
+		// A pod with no nodeName genuinely holds nothing. That, and only that,
+		// is what this means.
+		Pending:    p.Spec.NodeName == "",
+		Provenance: prov,
+		Owner:      AttributeOwner(p, ctrl, nsByName[p.Metadata.Namespace]),
+		Labels:     p.Metadata.Labels,
 	}
 	if p.Status.StartTime != nil {
 		view.StartTime = p.Status.StartTime
