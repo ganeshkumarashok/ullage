@@ -100,6 +100,23 @@ type Stats struct {
 	LastNonZero *time.Time
 	FallowSince time.Time
 
+	// Answered is the fraction of the window for which the "was this device
+	// ever non-zero" question actually got an answer. Prometheus is queried in
+	// chunks and a chunk can fail — a compacted block, a rate limit, a
+	// restarting Thanos store — and an unanswered interval is an interval in
+	// which the device might have been at 100%.
+	//
+	// It is a separate field rather than folded into Completeness because it
+	// has to bound *every* coverage question asked of this record, including
+	// CoverageOver, whose denominator is a pod's lifetime rather than the
+	// window. Folding it in left the pod-level check reading raw sample counts
+	// and never seeing the cap at all.
+	//
+	// Zero from an unset struct would silently disqualify every finding, so a
+	// record built by hand is read as fully answered; the scanner sets it
+	// explicitly.
+	Answered float64
+
 	// Stale reports that this series stopped arriving well before the window
 	// closed. A few missed scrapes are tolerated; a series that simply ends is
 	// not.
@@ -136,9 +153,28 @@ func (s Stats) CoverageOver(span, step time.Duration) float64 {
 	}
 	c := float64(s.Samples) / expected
 	if c > 1 {
-		return 1
+		c = 1
+	}
+	// A dense series over an interval nobody could answer for is not coverage.
+	// The pod may have had a sample every fifteen seconds for the six hours
+	// that were readable and been at full utilization for the eight that were
+	// not, and the sample count cannot tell those apart.
+	if a := s.answered(); a < c {
+		c = a
 	}
 	return c
+}
+
+// answered is Answered with the "unset means fully answered" convention
+// applied, so hand-built records and fixtures behave as before.
+func (s Stats) answered() float64 {
+	if s.Answered <= 0 {
+		return 1
+	}
+	if s.Answered > 1 {
+		return 1
+	}
+	return s.Answered
 }
 
 // FallowFor returns how long the device has read exactly zero up to now, and

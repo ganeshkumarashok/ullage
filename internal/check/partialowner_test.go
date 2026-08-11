@@ -287,3 +287,47 @@ func TestUnusedNodeTreatsAPinnedKarpenterPoolAsWhollyDeliberate(t *testing.T) {
 			"there is no per-node arithmetic that makes part of it reclaimable")
 	}
 }
+
+// The pod-level idle check reads CoverageOver, not Completeness, so the cap
+// that a partly-failed Prometheus read puts on a device's coverage has to reach
+// both or it protects only half the tool -- and the half it was missing is the
+// one that prints `kubectl scale --replicas=0`.
+//
+// The shape here is the dangerous one: a young pod with a dense series over the
+// interval that *was* readable. Sample count alone says 100% coverage. The
+// device could have been at full utilization for every hour that failed.
+func TestIdlePodRejectsADenseSeriesOverAnUnansweredWindow(t *testing.T) {
+	start := now.Add(-10 * 24 * time.Hour)
+	pod := inventory.PodView{
+		Ref:          inventory.PodRef{Namespace: "research", Name: "trainer", UID: "uid-trainer"},
+		Node:         "gpu-a",
+		Phase:        "Running",
+		Accelerators: 1,
+		StartTime:    &start,
+		Provenance:   api.Provenance{Controlled: false, Recognized: true, RootKind: "Pod", RootName: "trainer"},
+	}
+	nodes := []inventory.NodeView{{Name: "gpu-a", Pool: "gpu", Accelerators: 1, Ready: true, Age: 30 * 24 * time.Hour}}
+
+	// Enough samples to look complete for this pod's ten-day life.
+	st := idleStats(10*24*time.Hour, false)
+
+	answered := func(a float64) []inventory.Device {
+		s := st
+		s.Answered = a
+		return []inventory.Device{device("gpu-a-0", "gpu-a", "gpu",
+			&inventory.PodRef{Namespace: "research", Name: "trainer", UID: "uid-trainer"}, s)}
+	}
+
+	// Control: fully answered, and the finding is exactly what ullage is for.
+	if got := find(t, check.IdlePod{}, cluster(answered(1), []inventory.PodView{pod}, nodes)); len(got) != 1 {
+		t.Fatalf("a fully answered idle pod produced %d findings, want 1", len(got))
+	}
+
+	// Half the window went unanswered by the max query.
+	got := find(t, check.IdlePod{}, cluster(answered(0.5), []inventory.PodView{pod}, nodes))
+	if len(got) != 0 {
+		t.Fatalf("got %d findings from a device whose 'was it ever busy' question was only "+
+			"answered for half the window; the sample count says full coverage and cannot "+
+			"tell a quiet interval from an unread one", len(got))
+	}
+}

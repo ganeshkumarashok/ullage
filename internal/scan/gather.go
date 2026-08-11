@@ -400,6 +400,7 @@ func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *
 			// this turns a partial read into a rejected finding rather than a
 			// confident wrong one.
 			Completeness: clamp(samplesBy[key]/expected, 0, 1) * maxCovered,
+			Answered:     maxCovered,
 			Samples:      int(seriesSamplesBy[seriesKey(s.Labels, schema)]),
 		}
 		if series, ok := shapeBy[seriesKey(s.Labels, schema)]; ok {
