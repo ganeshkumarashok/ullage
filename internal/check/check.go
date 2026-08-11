@@ -70,6 +70,20 @@ type Subject struct {
 
 	// Nodes are the node names, for pool-scoped findings.
 	Nodes []string
+
+	// PartialOwner marks a finding that covers only some of the accelerator-
+	// holding pods belonging to its controller.
+	//
+	// This is the most dangerous shape a finding can have. A check that groups
+	// by root owner reports one row for "StatefulSet trainer", and the obvious
+	// remediation for a controller is to scale it to zero -- which stops every
+	// replica, including the ones doing work that was never part of the
+	// finding. One idle rank in a training job is not a reason to kill the job.
+	//
+	// Checks that group by owner must set this whenever the group does not
+	// cover every accelerator-holding pod that controller owns. The pipeline
+	// refuses to emit a controller-scoped command when it is set.
+	PartialOwner bool
 }
 
 // RawFinding is what a check emits.

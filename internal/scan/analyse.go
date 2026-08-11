@@ -277,7 +277,7 @@ func enrich(cl *inventory.Cluster, rf check.RawFinding, opts Options) api.Findin
 		f.OwnershipConfidence = OwnershipConfidence(pod.Owner)
 		f.Provenance = pod.Provenance
 		f.Accelerators = acceleratorsForPods(cl, rf.Subject.Pods, rf.Devices)
-		f.Fix = SynthesiseFix(pod.Provenance, rf.Subject.Namespace, names, pod.Owner, desc.Prevention)
+		f.Fix = SynthesiseFix(pod.Provenance, rf.Subject.Namespace, names, pod.Owner, desc.Prevention, rf.Subject.PartialOwner)
 		if rf.Check == api.CheckStuckPod {
 			f.Fix = stuckFix(pod, rf, desc)
 		}

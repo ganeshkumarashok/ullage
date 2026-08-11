@@ -161,6 +161,7 @@ func (c IdlePod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Ra
 	}
 
 	sort.Strings(order)
+	running := runningAcceleratorPodsByOwner(cl)
 	var out []RawFinding
 	for _, key := range order {
 		g := groups[key]
@@ -174,6 +175,9 @@ func (c IdlePod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Ra
 			Namespace: pod.Ref.Namespace,
 			Name:      subjectName(pod),
 			Pods:      g.pods,
+			// Idle replicas of a controller that also has working replicas.
+			// The pipeline must not offer to scale the controller.
+			PartialOwner: len(g.pods) < running[key],
 		}
 		out = append(out, RawFinding{
 			Check:      api.CheckIdlePod,
@@ -279,6 +283,27 @@ func deviceIDs(devices []inventory.Device) []string {
 
 // groupKeyFor groups by root owner, so one Deployment is one finding no matter
 // how many pods it has.
+// runningAcceleratorPodsByOwner counts, per group key, the pods that are
+// Running and holding accelerators.
+//
+// This is the denominator for PartialOwner. It counts Running pods only,
+// because those are the ones a scale-to-zero would stop mid-work; a pod that is
+// crash-looping is holding a device but is not doing anything that stopping it
+// would interrupt. A Running pod that a check excluded for any reason -- thin
+// metric coverage, too short a fallow run -- still counts, because "we did not
+// establish that this replica is idle" and "this replica is idle" must not
+// produce the same command.
+func runningAcceleratorPodsByOwner(cl *inventory.Cluster) map[string]int {
+	total := map[string]int{}
+	for _, p := range cl.Pods {
+		if p.Phase != "Running" || p.Pending || p.Accelerators == 0 {
+			continue
+		}
+		total[groupKeyFor(p)]++
+	}
+	return total
+}
+
 func groupKeyFor(p inventory.PodView) string {
 	if p.Provenance.Controlled && p.Provenance.RootName != "" {
 		return p.Ref.Namespace + "|" + p.Provenance.RootKind + "|" + p.Provenance.RootName

@@ -101,6 +101,12 @@ func (StuckPod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Raw
 
 	sort.Strings(order)
 	var out []RawFinding
+	// A wedged pod is still Phase=Running, so it is counted here too; the
+	// comparison below is against the group's own size for that reason. Any
+	// surplus is a replica that is not stuck, and scaling the controller to
+	// zero to fix a crash loop would stop it.
+	running := runningAcceleratorPodsByOwner(cl)
+
 	for _, key := range order {
 		g := groups[key]
 		sort.Slice(g.pods, func(i, j int) bool { return g.pods[i].Name < g.pods[j].Name })
@@ -129,6 +135,9 @@ func (StuckPod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Raw
 				Namespace: pod.Ref.Namespace,
 				Name:      subjectName(pod),
 				Pods:      g.pods,
+				// A controller with one broken replica usually has healthy
+				// ones. Scaling it to zero to fix a crash loop would stop them.
+				PartialOwner: len(g.pods) < running[key],
 			},
 			Fallow: held,
 			// State is directly observed from the API server rather than

@@ -132,11 +132,33 @@ func (r *Resolver) get(ctx context.Context, apiVersion, kind, namespace, name st
 // or may be destructive — and guessing is how a tool earns a reputation for
 // being dangerous. Naming the resource and declining to act on it is more
 // useful than a confident wrong command.
-func SynthesiseFix(prov api.Provenance, namespace string, pods []string, owner api.Owner, docs string) api.Fix {
+func SynthesiseFix(prov api.Provenance, namespace string, pods []string, owner api.Owner, docs string, partialOwner bool) api.Fix {
 	fix := api.Fix{
 		RequiresHumanConfirmation: true,
 		ConfirmWith:               owner.Identity,
 		Prevention:                docs,
+	}
+
+	// A finding that covers only some of a controller's accelerator-holding
+	// pods must never produce a controller-scoped command. Scaling the
+	// controller stops every replica, and the replicas that are working were,
+	// by definition, not part of what was measured. One idle rank does not
+	// justify killing the job.
+	//
+	// The refusal is deliberately not "here is a smaller command": deleting the
+	// idle pods individually does not work either, because the controller
+	// recreates them. There is no safe mechanical action, so ullage says so and
+	// names the thing a human has to decide.
+	if partialOwner && prov.Controlled && prov.RootName != "" {
+		fix.Targets = api.FixTargetNone
+		fix.Rationale = fmt.Sprintf(
+			"Only some of the accelerator-holding pods owned by %s %s are idle; the rest are "+
+				"doing work. Scaling the controller would stop those too, and deleting the idle "+
+				"pods alone would not free anything because %s recreates them. Right-sizing the "+
+				"replica count, or finding why this replica is idle while its siblings are not, "+
+				"is the real remediation.",
+			prov.RootKind, prov.RootName, prov.RootKind)
+		return fix
 	}
 
 	switch {
