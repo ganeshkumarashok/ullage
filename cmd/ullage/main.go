@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -31,6 +32,26 @@ var (
 	version = "v0.1.0-dev"
 	commit  = ""
 )
+
+// `go install ...@v0.1.0` applies no ldflags, so a user who asked for a
+// tagged release was told they were running "v0.1.0-dev". The module version
+// the toolchain actually resolved is recorded in the build info, and it is the
+// more truthful answer whenever the linker did not supply one.
+func init() {
+	if version != "v0.1.0-dev" {
+		return
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok || info.Main.Version == "" || info.Main.Version == "(devel)" {
+		return
+	}
+	version = info.Main.Version
+	for _, s := range info.Settings {
+		if s.Key == "vcs.revision" && len(s.Value) >= 7 {
+			commit = s.Value[:7]
+		}
+	}
+}
 
 const usage = `ullage — the GPU your cluster paid for and didn't use.
 
