@@ -3,6 +3,7 @@ package inventory
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/ullage-project/ullage/pkg/ullage/api"
@@ -404,27 +405,45 @@ func (a *AutoscalerView) owner(group string) string {
 	return best
 }
 
+// containsPool reports whether a node group name names a pool.
+//
+// Cloud providers decorate the pool name on both sides — an AKS pool "gpu"
+// appears as "aks-gpu-12345678-vmss" — so this cannot be equality. But it also
+// cannot be substring matching, in any form that treats the delimiter as
+// optional on one side: the pattern "-gpu" matches "aks-gpubig-1-vmss", so
+// pool "gpu" absorbs the reserved floor of the unrelated pool "gpubig". That
+// overstates the reservation and hides real waste, which is the exact failure
+// this matching exists to prevent.
+//
+// So compare on dash-delimited token boundaries. The pool name must appear as
+// a whole run of tokens: "gpu" matches [aks gpu 1234 vmss] but not
+// [aks gpubig 1 vmss], and the multi-token pool "gpu-big" still matches
+// [aks gpu big 2222 vmss].
 func containsPool(groupName, pool string) bool {
 	if groupName == pool {
 		return true
 	}
-	// "aks-gpu-12345678-vmss" contains "-gpu-"; require a delimiter so "gpu"
-	// does not match "gpubig".
-	for _, pattern := range []string{"-" + pool + "-", "-" + pool, pool + "-"} {
-		if len(pattern) <= len(groupName) && indexOf(groupName, pattern) >= 0 {
+	if pool == "" || groupName == "" {
+		return false
+	}
+	group := strings.Split(groupName, "-")
+	want := strings.Split(pool, "-")
+	if len(want) > len(group) {
+		return false
+	}
+	for i := 0; i+len(want) <= len(group); i++ {
+		matched := true
+		for j, tok := range want {
+			if group[i+j] != tok {
+				matched = false
+				break
+			}
+		}
+		if matched {
 			return true
 		}
 	}
 	return false
-}
-
-func indexOf(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
 }
 
 // DevicesOf returns the devices held by a pod.

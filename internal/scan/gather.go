@@ -254,7 +254,7 @@ const chunk = 24 * time.Hour
 func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *inventory.Inventory, start, end time.Time, step time.Duration) ([]inventory.Device, bool, error) {
 	window := end.Sub(start)
 
-	maxUtil, err := g.chunked(ctx, MetricGPUUtil, "max_over_time", start, end, maxCombine)
+	maxUtil, err := g.chunked(ctx, MetricGPUUtil, "max_over_time", schema, start, end, maxCombine)
 	if err != nil {
 		return nil, false, err
 	}
@@ -271,7 +271,7 @@ func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *
 		powerWindow = window
 	}
 	avgPower, _ := g.instant(ctx, fmt.Sprintf("avg_over_time(%s[%s])", MetricPower, promql.Range(powerWindow)), end)
-	samples, _ := g.chunked(ctx, MetricGPUUtil, "count_over_time", start, end, sumCombine)
+	samples, _ := g.chunked(ctx, MetricGPUUtil, "count_over_time", schema, start, end, sumCombine)
 
 	// The sparkline and "when did work last happen" need shape, not precision,
 	// so they use one coarse range query at an hourly step: 336 points per
@@ -409,7 +409,7 @@ func refine(st *inventory.Stats, s promql.Series, start, end time.Time, step tim
 // a chunk that fails reduces sample completeness, which the checks already
 // treat as a reason to lower confidence rather than to make a claim.
 func (g *Gatherer) chunked(
-	ctx context.Context, metric, fn string, start, end time.Time,
+	ctx context.Context, metric, fn string, schema promql.LabelSchema, start, end time.Time,
 	combine func(a, b float64) float64,
 ) ([]promql.VectorSample, error) {
 	acc := map[string]*promql.VectorSample{}
@@ -430,7 +430,12 @@ func (g *Gatherer) chunked(
 		}
 		ok = true
 		for _, s := range got {
-			k := deviceKey(s.Labels) + "|" + s.Labels["pod"] + s.Labels["exported_pod"]
+			// seriesKey, not an ad-hoc key: identity here has to mean exactly
+			// what it means everywhere else. Concatenating the pod labels
+			// without the namespace merged team-a/trainer and team-b/trainer
+			// on one card into a single result, summing one team's sample
+			// count into the other's coverage.
+			k := seriesKey(s.Labels, schema)
 			if cur, seen := acc[k]; seen {
 				cur.Value = combine(cur.Value, s.Value)
 				continue
