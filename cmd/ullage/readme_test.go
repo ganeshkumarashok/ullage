@@ -148,3 +148,39 @@ func firstDifference(want, got string) string {
 	}
 	return "transcripts differ only in length"
 }
+
+// `--version` is what people type, and what every install script and package
+// manager probe uses to confirm a binary works. Before this it reached the flag
+// parser and produced "flag provided but not defined: -version" on exit 2 --
+// a failed first command, and a failed automated check.
+func TestVersionAndHelpAnswerToTheUsualSpellings(t *testing.T) {
+	for _, arg := range []string{"version", "--version", "-version", "-V"} {
+		var err error
+		out := captureStdout(t, func() { err = run([]string{arg}) })
+		if err != nil {
+			t.Errorf("ullage %s: %v", arg, err)
+			continue
+		}
+		if !strings.HasPrefix(out, "ullage v") {
+			t.Errorf("ullage %s printed %q, want a version line", arg, firstLine(out))
+		}
+	}
+	for _, arg := range []string{"help", "--help", "-h", "-help"} {
+		var err error
+		out := captureStdout(t, func() { err = run([]string{arg}) })
+		if err != nil {
+			t.Errorf("ullage %s: %v", arg, err)
+			continue
+		}
+		if !strings.Contains(out, "Usage") && !strings.Contains(out, "ullage") {
+			t.Errorf("ullage %s printed %q, want the usage text", arg, firstLine(out))
+		}
+	}
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
+}

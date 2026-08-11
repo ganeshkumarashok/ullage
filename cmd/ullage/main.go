@@ -134,6 +134,20 @@ func run(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// The dashed spellings are matched first: the subcommand switch below is
+	// guarded on the argument not looking like a flag, so --version would
+	// otherwise reach the flag parser and exit 2.
+	if len(args) > 0 {
+		switch args[0] {
+		case "--version", "-version", "-V":
+			fmt.Printf("ullage %s\n", versionString())
+			return nil
+		case "--help", "-help":
+			fmt.Print(usage)
+			return nil
+		}
+	}
+
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		switch args[0] {
 		case "scan":
@@ -153,6 +167,9 @@ func run(args []string) error {
 			return cmdIgnore(args[1:])
 		case "checks":
 			return cmdChecks()
+		// --version is what people type. Reaching the flag parser it becomes
+		// "flag provided but not defined" and exit 2, which is a poor first
+		// impression and breaks the version probe in every install script.
 		case "version":
 			fmt.Printf("ullage %s\n", versionString())
 			return nil
