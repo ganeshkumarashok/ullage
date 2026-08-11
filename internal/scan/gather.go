@@ -23,6 +23,30 @@ const (
 	MetricProfSM  = "DCGM_FI_PROF_SM_ACTIVE"
 )
 
+// otherEngines are the accelerator engines that DCGM_FI_DEV_GPU_UTIL does not
+// see. It reports SM activity, so a device can read exactly zero across an
+// entire fortnight while doing continuous, expensive, entirely real work:
+//
+//   - a video pipeline living on NVENC and NVDEC, which is most of what
+//     inference-on-video looks like;
+//   - a data-loading or checkpointing stage saturating the copy engines;
+//   - a model parked in framebuffer between requests, which is the whole point
+//     of keeping a warm replica and is exactly what someone would be furious to
+//     have scaled to zero.
+//
+// All four are in dcgm-exporter's default counter set, so this asks for
+// nothing an ordinary installation does not already export. A device where any
+// of them was ever non-zero is not idle, whatever the SM gauge said.
+var otherEngines = []struct {
+	metric string
+	what   string
+}{
+	{"DCGM_FI_DEV_ENC_UTIL", "the video encoder"},
+	{"DCGM_FI_DEV_DEC_UTIL", "the video decoder"},
+	{"DCGM_FI_DEV_MEM_COPY_UTIL", "the memory copy engines"},
+	{"DCGM_FI_DEV_FB_USED", "framebuffer memory"},
+}
+
 // Gatherer turns a live cluster into the normalized fact layer.
 //
 // Everything backend-specific lives here. Past this point nothing knows that
@@ -111,9 +135,20 @@ func (g *Gatherer) Gather(ctx context.Context, opts Options) (*inventory.Cluster
 				"schema, so per-pod checks cannot run; node-level checks still apply")
 	}
 
-	devices, powerless, err := g.devices(ctx, schema, inv, start, end, opts.Step)
+	devices, powerless, engines, err := g.devices(ctx, schema, inv, start, end, opts.Step)
 	if err != nil {
 		return nil, inv, warnings, err
+	}
+	// Saying which engines were consulted is not a detail. "No GPU work" from a
+	// tool that only looked at the SMs is a different statement from one that
+	// checked the encoder, the decoder, the copy engines and framebuffer too,
+	// and the operator deciding whether to run the command needs to know which
+	// of those they were given.
+	if len(engines) == 0 {
+		warnings = append(warnings,
+			"only DCGM_FI_DEV_GPU_UTIL was available, which reports SM activity alone; work "+
+				"on the video encoder or decoder, the copy engines, or a model held resident "+
+				"in framebuffer reads as zero here and cannot be ruled out")
 	}
 	if powerless {
 		warnings = append(warnings,
@@ -129,6 +164,7 @@ func (g *Gatherer) Gather(ctx context.Context, opts Options) (*inventory.Cluster
 		Devices:           devices,
 		MetricsAttributed: schema.Found,
 		PodLabelSchema:    schema.Pod,
+		EnginesChecked:    engines,
 	}
 
 	// Who decides whether an empty node stays? nil means nobody could be
@@ -286,7 +322,7 @@ const chunk = 24 * time.Hour
 // question "was this ever non-zero in the window" is an aggregate, and asking
 // Prometheus for a fortnight of raw samples for every device to answer it in Go
 // would move tens of millions of samples for a few hundred booleans.
-func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *inventory.Inventory, start, end time.Time, step time.Duration) ([]inventory.Device, bool, error) {
+func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *inventory.Inventory, start, end time.Time, step time.Duration) ([]inventory.Device, bool, []string, error) {
 	window := end.Sub(start)
 
 	// maxCovered is the fraction of the window the "was it ever non-zero"
@@ -296,10 +332,10 @@ func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *
 	// recommends deleting a busy GPU.
 	maxUtil, maxCovered, err := g.chunked(ctx, MetricGPUUtil, "max_over_time", schema, start, end, maxCombine)
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	if len(maxUtil) == 0 {
-		return nil, false, promql.ErrNoSeries
+		return nil, false, nil, promql.ErrNoSeries
 	}
 	// Power is averaged over a recent window rather than the whole one. The
 	// claim being corroborated is that the device is doing nothing *now*, and a
@@ -310,10 +346,42 @@ func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *
 	if window < powerWindow {
 		powerWindow = window
 	}
+	// Every other engine DCGM can see. A device busy on any of them is not
+	// idle, so the answers are merged into one "was this ever non-zero" map and
+	// consulted alongside the SM gauge.
+	//
+	// A metric that is simply not exported comes back empty, which disqualifies
+	// nothing — dcgm-exporter can be configured down to a handful of counters,
+	// and refusing to run against those installations would be worse than
+	// running with the SM gauge alone, provided the report says which engines
+	// were actually checked. Which engines answered is recorded for exactly
+	// that reason.
+	busyElsewhere := map[string]string{}
+	var checkedEngines []string
+	for _, e := range otherEngines {
+		vals, covered, err := g.chunked(ctx, e.metric, "max_over_time", schema, start, end, maxCombine)
+		if err != nil || covered <= 0 || len(vals) == 0 {
+			continue
+		}
+		checkedEngines = append(checkedEngines, e.metric)
+		for _, v := range vals {
+			if v.Value <= 0 {
+				continue
+			}
+			k := deviceKey(v.Labels)
+			if k == "" {
+				continue
+			}
+			if _, seen := busyElsewhere[k]; !seen {
+				busyElsewhere[k] = e.what
+			}
+		}
+	}
+
 	avgPower, _ := g.instant(ctx, fmt.Sprintf("avg_over_time(%s[%s])", MetricPower, promql.Range(powerWindow)), end)
 	samples, _, err := g.chunked(ctx, MetricGPUUtil, "count_over_time", schema, start, end, sumCombine)
 	if err != nil && ctx.Err() != nil {
-		return nil, false, ctx.Err()
+		return nil, false, nil, ctx.Err()
 	}
 
 	// The sparkline and "when did work last happen" need shape, not precision,
@@ -389,9 +457,15 @@ func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *
 			}
 		}
 
+		// The SM gauge said nothing ran; another engine says something did.
+		// The second is evidence of work and the first is only the absence of
+		// one kind of it, so the second wins.
+		busyOn := busyElsewhere[key]
+
 		d.Util = inventory.Stats{
 			Max:            s.Value,
-			ZeroThroughout: s.Value == 0,
+			ZeroThroughout: s.Value == 0 && busyOn == "",
+			BusyEngine:     busyOn,
 			FallowSince:    start,
 			// Capped by how much of the window the max query answered for.
 			// Sample counts come from a separate query, so without this cap a
@@ -413,7 +487,7 @@ func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 
-	return out, len(avgPower) == 0, nil
+	return out, len(avgPower) == 0, checkedEngines, nil
 }
 
 // refine fills in the parts of a device's statistics that need the shape of the

@@ -50,6 +50,12 @@ type Cluster struct {
 	// makes no claim from them; their availability gates everything after it,
 	// so it is worth reporting.
 	ProfilingMetrics bool
+
+	// EnginesChecked lists the accelerator engine metrics beyond the SM gauge
+	// that returned data and were therefore consulted before calling anything
+	// idle. Empty means the SM gauge was all that was available, which is a
+	// materially weaker claim and is warned about.
+	EnginesChecked []string
 }
 
 // Device is one physical accelerator, with its measurement already summarised.
@@ -92,10 +98,21 @@ type Stats struct {
 	Completeness float64
 
 	// ZeroThroughout is the load-bearing fact of the idle check, and it is true
-	// only when every sample read exactly zero. GPU utilization is a poor
-	// measure of how hard a device is working — a single-thread kernel reads
-	// 100% — but it is completely reliable when it reads zero.
+	// only when every sample of every engine that was checked read exactly
+	// zero. GPU utilization is a poor measure of how hard a device is working —
+	// a single-thread kernel reads 100% — and it is not even reliable at zero,
+	// because DCGM_FI_DEV_GPU_UTIL reports SM activity only. See BusyEngine.
 	ZeroThroughout bool
+
+	// BusyEngine names an accelerator engine other than the SMs that was
+	// observed doing work, and is empty when none was.
+	//
+	// A video pipeline on NVENC, a data loader saturating the copy engines, or
+	// a warm model parked in framebuffer all read exactly zero on the SM gauge
+	// while being entirely, expensively busy. Recording *which* engine was
+	// active rather than a bare boolean is deliberate: the reason a finding was
+	// withheld is more useful to the operator than the fact that it was.
+	BusyEngine string
 
 	LastNonZero *time.Time
 	FallowSince time.Time
