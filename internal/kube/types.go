@@ -518,6 +518,10 @@ type ResourceClaim struct {
 					Device string `json:"device"`
 					Driver string `json:"driver"`
 					Pool   string `json:"pool"`
+					// ShareID is set when a device is partitioned between
+					// claims, so the same physical device appears in several
+					// allocations and must not be counted once per claim.
+					ShareID string `json:"shareID,omitempty"`
 				} `json:"results"`
 			} `json:"devices"`
 		} `json:"allocation,omitempty"`

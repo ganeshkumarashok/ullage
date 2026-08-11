@@ -856,21 +856,114 @@ func initialising(p *kube.Pod) bool {
 // This is what stops a DRA cluster looking like a cluster with no accelerators
 // at all — the worst possible failure, because it reports a healthy cluster the
 // tool never examined.
-// draDevicesByPod counts the devices each pod holds through a ResourceClaim.
+// acceleratorDrivers are the DRA drivers known to hand out accelerators.
+//
+// DRA is not a GPU feature. The same ResourceClaim machinery allocates NICs,
+// FPGAs and any other device a vendor writes a driver for, and every one of
+// them appears in exactly the shape a GPU claim does. Counting results without
+// reading the driver turns a pod holding two RDMA NICs into a pod holding two
+// idle H100s, priced accordingly.
+var acceleratorDrivers = map[string]bool{
+	"gpu.nvidia.com":              true,
+	"gpu.amd.com":                 true,
+	"gpu.intel.com":               true,
+	"tpu.google.com":              true,
+	"gaudi.intel.com":             true,
+	"accelerator.tenstorrent.com": true,
+}
+
+// isAcceleratorDriver reports whether a DRA driver hands out accelerators.
+//
+// The allowlist cannot be complete -- anyone may publish a driver -- so an
+// unknown driver whose name identifies it as an accelerator is accepted, and
+// anything else is not counted. Guessing wrong in the permissive direction
+// invents hardware and bills for it; guessing wrong in the conservative
+// direction under-reports, which the scan already says out loud when DRA
+// devices go unread.
+func isAcceleratorDriver(driver string) bool {
+	d := strings.ToLower(strings.TrimSpace(driver))
+	if d == "" {
+		// Older allocations, and fakes, omit it. A claim that reached this far
+		// was found on a node ullage already believes has accelerators.
+		return true
+	}
+	if acceleratorDrivers[d] {
+		return true
+	}
+	first, _, _ := strings.Cut(d, ".")
+	switch first {
+	case "gpu", "tpu", "npu", "accelerator", "gaudi":
+		return true
+	}
+	return false
+}
+
+// deviceIdentity names the physical device an allocation result points at, so
+// the same device claimed twice is counted once.
+func deviceIdentity(driver, pool, device string) string {
+	return driver + "/" + pool + "/" + device
+}
+
+// acceleratorsIn returns the distinct accelerators a claim allocates.
+//
+// A device partitioned between claims carries a shareID and appears in each of
+// them; the identity deliberately excludes the shareID so those collapse to the
+// one card they are cut from.
+func acceleratorsIn(c *kube.ResourceClaim) []string {
+	if c.Status.Allocation == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range c.Status.Allocation.Devices.Results {
+		if !isAcceleratorDriver(r.Driver) {
+			continue
+		}
+		id := deviceIdentity(r.Driver, r.Pool, r.Device)
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
+}
+
+// draDevicesByPod counts the accelerators each pod holds through a
+// ResourceClaim.
+//
+// A claim may be reserved for several pods at once. The devices are shared
+// between them, not duplicated for each, so billing the full count to every pod
+// would report three times the hardware the cluster actually has -- and the
+// census reconciliation that is supposed to catch exactly that kind of error
+// would see the invented devices as real.
 func draDevicesByPod(claims []kube.ResourceClaim) map[string]int {
 	out := map[string]int{}
-	for _, c := range claims {
-		if c.Status.Allocation == nil {
+	for i := range claims {
+		c := &claims[i]
+		devices := acceleratorsIn(c)
+		if len(devices) == 0 {
 			continue
 		}
-		n := len(c.Status.Allocation.Devices.Results)
-		if n == 0 {
-			continue
-		}
+		var holders []string
 		for _, rf := range c.Status.ReservedFor {
 			if rf.UID != "" {
-				out[rf.UID] += n
+				holders = append(holders, rf.UID)
 			}
+		}
+		if len(holders) == 0 {
+			continue
+		}
+		// The count is summed into the pod's accelerator request, so the totals
+		// across pods have to add up to the devices that exist. One device
+		// shared by three pods is one device: handing each of them a whole one
+		// would report three, and a cluster that appears to own hardware it
+		// never bought is the failure the census reconciliation exists to
+		// catch. Devices are dealt out round-robin over a stable order, so the
+		// remainder lands somewhere rather than being invented or dropped.
+		sort.Strings(holders)
+		for i := range devices {
+			out[holders[i%len(holders)]]++
 		}
 	}
 	return out
@@ -885,17 +978,28 @@ func draDevicesByNode(claims []kube.ResourceClaim, pods []kube.Pod) map[string]i
 		nodeOfPod[pods[i].Metadata.UID] = pods[i].Spec.NodeName
 	}
 	out := map[string]int{}
-	for _, c := range claims {
-		if c.Status.Allocation == nil {
-			continue
-		}
-		n := len(c.Status.Allocation.Devices.Results)
-		if n == 0 {
+	// A device shared between pods on the same node is one device on that node,
+	// and the identity is what makes that true regardless of how many claims
+	// mention it.
+	seenByNode := map[string]map[string]bool{}
+	for i := range claims {
+		c := &claims[i]
+		devices := acceleratorsIn(c)
+		if len(devices) == 0 {
 			continue
 		}
 		for _, rf := range c.Status.ReservedFor {
 			if node := nodeOfPod[rf.UID]; node != "" {
-				out[node] += n
+				if seenByNode[node] == nil {
+					seenByNode[node] = map[string]bool{}
+				}
+				for _, id := range devices {
+					if seenByNode[node][id] {
+						continue
+					}
+					seenByNode[node][id] = true
+					out[node]++
+				}
 				break
 			}
 		}
