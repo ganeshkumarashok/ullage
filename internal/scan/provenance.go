@@ -2,6 +2,7 @@ package scan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -77,15 +78,33 @@ func (r *Resolver) Resolve(ctx context.Context, pod *kube.Pod) api.Provenance {
 
 	// Bounded walk: ownership chains are shallow, and a cycle in owner
 	// references would otherwise hang the scan.
+	//
+	// Whether the walk *finished* is recorded, because the two ways it can end
+	// look identical afterwards and mean opposite things. A walk that stops
+	// because an object has no controller has found the root. A walk that
+	// stops because the object could not be read has found whatever it
+	// happened to be holding -- usually the ReplicaSet -- and calling that the
+	// root produces `kubectl scale replicaset ... --replicas=0`, which the
+	// Deployment above it reverses on its next reconcile.
+	//
+	// The operator runs the command, sees the pods come back, and concludes
+	// the tool is wrong. It was: it recommended an action against an object it
+	// had already failed to understand.
+	truncated := true
 	for depth := 0; depth < 6; depth++ {
 		obj, err := r.get(ctx, apiVersion, kind, namespace, name)
 		if err != nil || obj == nil {
-			// The object is gone or unreadable. What is known is still worth
-			// reporting: the kind and name came from the owner reference.
+			// Gone or unreadable. What is known is still worth reporting: the
+			// kind and name came from the owner reference.
+			var nf *kube.NotFound
+			// A deleted object genuinely has no parent left to find, so the
+			// chain really does end here.
+			truncated = !errors.As(err, &nf)
 			break
 		}
 		parent := controllerOf(obj.Metadata.OwnerReferences)
 		if parent == nil {
+			truncated = false
 			break
 		}
 		kind, name, apiVersion = parent.Kind, parent.Name, parent.APIVersion
@@ -96,6 +115,7 @@ func (r *Resolver) Resolve(ctx context.Context, pod *kube.Pod) api.Provenance {
 	prov.RootName = name
 	prov.APIVersion = apiVersion
 	prov.Recognized = recognisedKinds[kind]
+	prov.Truncated = truncated
 	return prov
 }
 
@@ -157,6 +177,27 @@ func SynthesiseFix(prov api.Provenance, namespace string, pods []string, owner a
 				"pods alone would not free anything because %s recreates them. Right-sizing the "+
 				"replica count, or finding why this replica is idle while its siblings are not, "+
 				"is the real remediation.",
+			prov.RootKind, prov.RootName, prov.RootKind)
+		return fix
+	}
+
+	// The ownership walk did not reach the root. RootKind is the last link that
+	// happened to be readable, and acting on it is worse than doing nothing:
+	// scaling a ReplicaSet is reverted by its Deployment within seconds, so
+	// the operator runs the command, watches the pods come back, and concludes
+	// the tool does not work.
+	//
+	// The finding itself is still worth reporting -- the accelerators really
+	// are idle, and that is the part that was measured. What is withheld is
+	// the command, because it was derived from an object ullage already failed
+	// to read.
+	if prov.Truncated && prov.Controlled {
+		fix.Targets = api.FixTargetNone
+		fix.Rationale = fmt.Sprintf(
+			"The ownership chain could not be followed past %s %s, so its root controller is "+
+				"unknown. Acting on %s directly may be undone immediately — a ReplicaSet, for "+
+				"example, is restored by the Deployment above it. Grant read access to the "+
+				"owning kind, or resolve the owner by hand, before scaling anything.",
 			prov.RootKind, prov.RootName, prov.RootKind)
 		return fix
 	}

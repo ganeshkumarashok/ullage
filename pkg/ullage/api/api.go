@@ -299,6 +299,14 @@ type Provenance struct {
 	// Chain is typed rather than prose because consumers will read it, and a
 	// slice of formatted strings is an invitation to parse them back.
 	Chain []OwnerRef `json:"chain,omitempty"`
+
+	// Truncated marks a chain that stopped because an object could not be
+	// read, rather than because the root was reached. RootKind is then the
+	// last link that happened to be readable, not the root -- usually a
+	// ReplicaSet, whose Deployment reverses any change made to it.
+	//
+	// No remediation command is emitted for a truncated chain.
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // OwnerRef is one link in an ownership chain.

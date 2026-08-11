@@ -45,6 +45,7 @@ byDesign[].provenance.controlled boolean
 byDesign[].provenance.recognized boolean
 byDesign[].provenance.rootKind string
 byDesign[].provenance.rootName string
+byDesign[].provenance.truncated boolean
 byDesign[].rank integer
 byDesign[].risk string
 byDesign[].summary string
@@ -109,6 +110,7 @@ recommendations[].provenance.controlled boolean
 recommendations[].provenance.recognized boolean
 recommendations[].provenance.rootKind string
 recommendations[].provenance.rootName string
+recommendations[].provenance.truncated boolean
 recommendations[].rank integer
 recommendations[].risk string
 recommendations[].summary string
@@ -187,6 +189,7 @@ suppressed[].provenance.controlled boolean
 suppressed[].provenance.recognized boolean
 suppressed[].provenance.rootKind string
 suppressed[].provenance.rootName string
+suppressed[].provenance.truncated boolean
 suppressed[].rank integer
 suppressed[].risk string
 suppressed[].summary string
