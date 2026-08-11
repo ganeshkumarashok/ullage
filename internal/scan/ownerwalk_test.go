@@ -29,6 +29,14 @@ func (o *ownerAPI) server(t *testing.T) *httptest.Server {
 			}})
 
 		case strings.Contains(r.URL.Path, "/replicasets/"):
+			// Names are honoured so that "deleted" can be told apart from
+			// "refused": a handler that returns the same object whatever it is
+			// asked for cannot express an owner that is gone.
+			if !strings.HasSuffix(r.URL.Path, "/featurizer-7d9") {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"kind":"Status","code":404,"message":"not found"}`))
+				return
+			}
 			if o.denyRS {
 				w.WriteHeader(http.StatusForbidden)
 				_, _ = w.Write([]byte(`{"kind":"Status","code":403,"message":"forbidden"}`))
@@ -130,5 +138,57 @@ func TestCompleteOwnerWalkReachesTheDeployment(t *testing.T) {
 	fix := SynthesiseFix(prov, "ml", []string{"featurizer-7d9-abcde"}, api.Owner{}, "", false)
 	if !strings.Contains(fix.Command, "deployment") {
 		t.Fatalf("command = %q, want it to target the Deployment", fix.Command)
+	}
+}
+
+// Refusing to guess is right, but staying quiet about why is not. A truncated
+// chain has two very different causes -- the object is gone, or you are not
+// allowed to read it -- and only one of them is fixed by editing a Role.
+//
+// This matters more on GPU clusters than anywhere else, because the thing
+// owning a training pod is usually a custom resource the shipped RBAC cannot
+// know about: PyTorchJob, MPIJob, RayCluster, Workflow. Without the kind named
+// in a warning, an evaluator sees a tool that cannot attribute their most
+// important workloads and has no way to discover that a two-line grant fixes
+// it.
+func TestRefusedOwnerLookupIsReportedAsAPermissionsGap(t *testing.T) {
+	srv := (&ownerAPI{denyRS: true}).server(t)
+	kc, err := kube.New(kube.Config{APIServer: srv.URL, Token: "t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewResolver(kc)
+	r.Resolve(context.Background(), podOwnedByReplicaSet())
+
+	denied := r.Denied()
+	if len(denied) != 1 || denied[0] != "ReplicaSet.apps" {
+		t.Fatalf("Denied() = %v, want [ReplicaSet.apps]: a 403 during the owner walk has to "+
+			"be distinguishable from an owner that genuinely does not exist, and named in "+
+			"the form an RBAC rule uses.", denied)
+	}
+}
+
+// A chain that ends because the object was deleted is not a permissions
+// problem, and telling someone to edit their RBAC over it sends them to fix
+// something that is not broken. Job pods reach this state routinely: the Job
+// is cleaned up by TTL while its pod is still being reported.
+func TestDeletedOwnerIsNotReportedAsAPermissionsGap(t *testing.T) {
+	srv := (&ownerAPI{}).server(t)
+	kc, err := kube.New(kube.Config{APIServer: srv.URL, Token: "t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pod := podOwnedByReplicaSet()
+	pod.Metadata.OwnerReferences[0].Name = "vanished"
+
+	r := NewResolver(kc)
+	r.Resolve(context.Background(), pod)
+
+	if denied := r.Denied(); len(denied) != 0 {
+		t.Fatalf("Denied() = %v, want none: the owner returned 404, which means it is gone, "+
+			"not that we were refused. Reporting it as a permissions gap sends the reader "+
+			"to edit a Role that is already correct.", denied)
 	}
 }

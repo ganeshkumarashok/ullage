@@ -317,10 +317,17 @@ kubectl apply -f deploy/rbac.yaml
 kubectl apply -f deploy/cronjob.yaml
 ```
 
-[`deploy/rbac.yaml`](deploy/rbac.yaml) is the complete permission set, one
-`apiGroups` block at a time with a comment explaining why each is needed. Every
-verb is `get` or `list`. ConfigMap access is scoped by `resourceNames` to the
-single autoscaler status object rather than granted cluster-wide.
+[`deploy/rbac.yaml`](deploy/rbac.yaml) is the permission set, one `apiGroups`
+block at a time with a comment explaining why each is needed. Every verb is
+`get` or `list` — nothing in it can change anything. ConfigMap access is scoped
+by `resourceNames` to the single autoscaler status object rather than granted
+cluster-wide.
+
+It cannot cover custom controllers, and on a GPU cluster it often will not: if
+your pods are owned by a `PyTorchJob`, a `RayCluster` or an Argo `Workflow`,
+ullage cannot read them under this file. Rather than silently attributing those
+pods to nobody, it warns and names the kind, so the missing grant is a two-line
+edit instead of a mystery.
 
 The CronJob runs weekly, not hourly, and that is deliberate: `ullage` measures a
 two-week window and reports capacity that has been fallow for days. Running it
@@ -374,6 +381,24 @@ change to one file. Nobody has done it yet, and this table says so rather than
 letting the architecture imply a capability that does not exist.
 
 ## Output
+
+`--output html` writes a single self-contained file: no network requests, no
+scripts required to read it, and every number derived from the same scan the
+terminal printed. It opens with a capacity ledger that accounts for the whole
+window — what could not be analysed, what is idle by design, what was flagged,
+and what is left — so the figure at the top can be checked against its parts
+rather than taken on trust. It is meant for the conversation that follows a
+scan, where the person who has to approve a change was not the person who ran
+it.
+
+```console
+$ ullage demo --output html > report.html
+```
+
+Add `--redact` when it leaves your hands. Namespaces, workload names and owner
+identities are replaced everywhere they appear — including inside summaries,
+`kubectl` commands and link anchors — while the grouping and the arithmetic
+stay intact, so the report still argues its case without naming anyone.
 
 `--output json` emits a versioned, stable document (`ullage.dev/v0.1`) defined
 in [`pkg/ullage/api`](pkg/ullage/api). It records the effective thresholds, the

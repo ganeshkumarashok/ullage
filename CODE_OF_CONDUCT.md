@@ -87,11 +87,26 @@ Project maintainers who do not follow or enforce the Code of Conduct may be temp
 
 ## Reporting
 
-For incidents occurring in the Kubernetes community, contact the [Kubernetes Code of Conduct Committee](https://git.k8s.io/community/committee-code-of-conduct) via <conduct@kubernetes.io>. You can expect a response within three business days.
+**ullage has adopted the text above. It is not a CNCF project and is not part
+of the Kubernetes project, so neither the CNCF nor the Kubernetes Code of
+Conduct Committee has jurisdiction here and neither will act on a report about
+this repository.** Sending one there would cost you time you do not have in
+the middle of an incident. Adopting the CNCF's wording is a statement about the
+standard this project holds itself to, not a claim of affiliation.
 
-For other projects, or for incidents that are project-agnostic or impact multiple CNCF projects, please contact the [CNCF Code of Conduct Committee](https://www.cncf.io/conduct/committee/) via <conduct@cncf.io>.  Alternatively, you can contact any of the individual members of the [CNCF Code of Conduct Committee](https://www.cncf.io/conduct/committee/) to submit your report. For more detailed instructions on how to submit a report, including how to submit a report anonymously, please see our [Incident Resolution Procedures](https://github.com/cncf/foundation/blob/main/code-of-conduct/coc-incident-resolution-procedures.md). You can expect a response within three business days.
+Report incidents in this project's spaces — issues, pull requests, discussions
+— to the maintainers listed in [MAINTAINERS.md](MAINTAINERS.md), privately, by
+GitHub direct message or by email to the address on that maintainer's GitHub
+profile.
 
-For incidents occurring at CNCF event that is produced by the Linux Foundation, please contact <eventconduct@cncf.io>.
+There is currently one maintainer, which is worth saying plainly: if your
+report concerns that person, there is no independent body to escalate to
+inside this project. GitHub's own [reporting
+process](https://docs.github.com/en/communities/maintaining-your-safety-on-github/reporting-abuse-or-spam)
+is independent of this repository and applies to conduct on the platform. If
+ullage is ever donated to a foundation, this section will be replaced by that
+foundation's process, and this paragraph is here so nobody mistakes an
+aspiration for a safeguard that exists today.
 
 ## Frequently asked questions
 For more information about this Code of Conduct, please see the [CNCF Code of Conduct Frequently Asked Questions](https://www.cncf.io/conduct/faq/).

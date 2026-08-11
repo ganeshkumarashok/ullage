@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/ullage-project/ullage/internal/kube"
@@ -48,10 +49,33 @@ var recognisedKinds = map[string]bool{
 type Resolver struct {
 	client *kube.Client
 	cache  map[string]*kube.Controller
+	// denied records the kinds the API server refused, so a permissions gap
+	// can be reported as a permissions gap. Owner walks follow whatever the
+	// ownerReferences point at, and on a GPU cluster that is frequently a
+	// custom resource -- PyTorchJob, RayCluster, Workflow -- that the shipped
+	// RBAC does not grant. Without this the chain simply stops, the fix
+	// degrades to "no safe automatic fix", and the tool looks incapable when
+	// it is merely unauthorised.
+	denied map[string]bool
 }
 
 func NewResolver(c *kube.Client) *Resolver {
-	return &Resolver{client: c, cache: map[string]*kube.Controller{}}
+	return &Resolver{
+		client: c,
+		cache:  map[string]*kube.Controller{},
+		denied: map[string]bool{},
+	}
+}
+
+// Denied returns the kinds whose lookups were refused, as "Kind.group",
+// sorted. Empty when nothing was refused.
+func (r *Resolver) Denied() []string {
+	out := make([]string, 0, len(r.denied))
+	for k := range r.denied {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Resolve walks from a pod to the root of its ownership chain.
@@ -100,6 +124,10 @@ func (r *Resolver) Resolve(ctx context.Context, pod *kube.Pod) api.Provenance {
 			// A deleted object genuinely has no parent left to find, so the
 			// chain really does end here.
 			truncated = !errors.As(err, &nf)
+			var forbidden *kube.Forbidden
+			if errors.As(err, &forbidden) {
+				r.denied[kindKey(kind, apiVersion)] = true
+			}
 			break
 		}
 		parent := controllerOf(obj.Metadata.OwnerReferences)
@@ -117,6 +145,21 @@ func (r *Resolver) Resolve(ctx context.Context, pod *kube.Pod) api.Provenance {
 	prov.Recognized = recognisedKinds[kind]
 	prov.Truncated = truncated
 	return prov
+}
+
+// kindKey names a kind the way an RBAC rule does, so the warning can be
+// pasted almost directly into a Role.
+func kindKey(kind, apiVersion string) string {
+	group := apiVersion
+	if i := strings.Index(group, "/"); i >= 0 {
+		group = group[:i]
+	} else {
+		group = "" // core
+	}
+	if group == "" {
+		return kind
+	}
+	return kind + "." + group
 }
 
 func controllerOf(refs []kube.OwnerReference) *kube.OwnerReference {

@@ -1,4 +1,19 @@
-# The complete set of permissions ullage needs, and nothing beyond it.
+# Everything ullage reads, and nothing beyond it. All of it read-only: there is
+# no verb here that can change anything, which is the property to check if you
+# are reviewing this file rather than reading it.
+#
+# One gap is deliberate and worth knowing about before you deploy this. The
+# owner walk follows whatever a pod's ownerReferences point at, and on a GPU
+# cluster that is often a custom resource this file cannot know about --
+# PyTorchJob, MPIJob, RayCluster, Workflow, PodGroup. Granting those blind is
+# not possible and guessing at a list would go stale, so ullage instead reports
+# a refused lookup as a warning naming the kind, and attributes the workload to
+# the deepest owner it could read rather than inventing one. If you see that
+# warning, add the kind here:
+#
+#   - apiGroups: ["kubeflow.org"]
+#     resources: ["pytorchjobs"]
+#     verbs: ["get"]
 #
 # Every verb here is read-only. This is not a promise about intent — the
 # Kubernetes client ullage is built on has no write methods at all, so there is

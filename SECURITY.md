@@ -4,13 +4,24 @@
 
 Please report security issues privately via
 [GitHub Security Advisories](https://github.com/ullage-project/ullage/security/advisories/new).
+If that link does not work — private reporting has to be enabled on the
+repository, and this project is young — email the maintainer listed in
+[MAINTAINERS.md](MAINTAINERS.md) at the address on their GitHub profile rather
+than assuming the report was received.
 
 Do not open a public issue for a security problem.
 
-We will acknowledge a report within 5 working days and aim to have an
-assessment within 10. If we agree it is a vulnerability, we will agree a
-disclosure timeline with you, credit you unless you ask us not to, and publish
-an advisory alongside the fix.
+ullage is maintained by one person in their own time. That does not come with
+a response-time guarantee, and publishing one this project cannot honour would
+be worse than saying so: a reporter who is told five working days and hears
+nothing has no way to tell a busy maintainer from a lost report. What is
+promised instead is that reports are read, that you will be told what is
+happening rather than left waiting, that a confirmed vulnerability gets a
+disclosure timeline agreed with you, that you will be credited unless you ask
+not to be, and that an advisory is published alongside the fix. If a week
+passes with no reply, escalate by opening a public issue that says only that
+you sent a private report and heard nothing — with no details of the
+vulnerability itself.
 
 ## Supported versions
 

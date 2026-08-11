@@ -102,6 +102,12 @@ would have seen.
 
 ## Sign-off
 
+The pre-release history of this repository predates this requirement and
+carries no sign-offs; it is not retroactively certified, and nothing in CI
+enforces the rule yet. It applies from the first public contribution onward,
+and the honest reason to follow it is that a provenance rule adopted after a
+project has contributors is far harder to adopt than one it starts with.
+
 Commits must carry a `Signed-off-by` line certifying the
 [Developer Certificate of Origin](https://developercertificate.org/):
 

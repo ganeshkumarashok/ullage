@@ -21,7 +21,11 @@ A node is reported when all of these hold:
 1. It advertises at least one accelerator.
 2. It is `Ready`, schedulable, and not cordoned or draining.
 3. No accelerator-holding pod is placed on it.
-4. No accelerator on it reported work within the window.
+4. No accelerator on it reported work within `--idle-threshold`. Any evidence
+   of recent work excludes the node, whether or not the coverage was good
+   enough to make a positive claim: evidence that something ran is not held to
+   the same bar as evidence that nothing did, because the two errors are not
+   symmetric.
 5. Its age is at least `--idle-threshold` (default `24h`), so a node that
    joined an hour ago is not reported for having nothing on it yet.
 

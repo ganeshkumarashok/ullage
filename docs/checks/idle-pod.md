@@ -1,12 +1,18 @@
 # idle-pod
 
 > A pod is Running and holding accelerators, and every utilization sample for
-> those devices read exactly zero for the whole window.
+> those devices has read exactly zero for at least `--idle-threshold`.
 
 ## What the finding claims
 
 Only this: **no kernel was resident on these devices at any sampled moment in
-the window.**
+the fallow span the finding names.**
+
+The span is the trailing run of zeroes, not the whole window. A pod that worked
+nine days ago and has read exactly zero since is idle now, and a rule demanding
+zero across the entire window would miss it — and would miss more of them the
+longer the window, which is the wrong way round. The finding always states the
+span it measured, so the claim can be checked against its own evidence.
 
 That is a narrow claim, and it is narrow on purpose. It is not a claim that the
 workload is unimportant, not a claim that the owner did something wrong, and
@@ -26,25 +32,42 @@ The device did nothing.
    resource claim.
 2. Ask the metrics backend for per-device utilization across `--window`
    (default `14d`), attributed to that pod.
-3. Keep the pod only if **every** returned sample is exactly zero.
-4. Require sample coverage of at least **80%** of the window. A device that
-   reported for twenty minutes out of fourteen days has not demonstrated
-   anything, so it is not reported.
-5. Require the fallow span to be at least `--idle-threshold` (default `24h`).
+3. Take the trailing run of zeroes on each device, and use the **shortest** of
+   them: one busy device makes the pod busy.
+4. Require sample coverage of at least **80%**, measured over the pod's own
+   observable lifetime rather than the scan window. Against the window a pod
+   that has existed for two days of a fortnight tops out near 14% coverage
+   however completely it was watched, so a window-relative floor would discard
+   every young pod — and "someone started an expensive pod last week and forgot
+   it" is the most actionable finding here.
+5. Require that fallow span to be at least `--idle-threshold` (default `24h`),
+   and no longer than the pod has existed.
 
 A pod that fails any of 3–5 is not reported. There is no partial credit and no
-"looks low" band.
+"looks low" band: no average is taken and no threshold is applied to the
+utilization value, because "low" is a judgement about someone else's workload
+and "zero" is not.
+
+A device whose series stopped arriving is **not** treated as a device reading
+zero. A stale series disqualifies the pod outright, because a dead exporter
+would otherwise become a cluster-wide deletion recommendation.
 
 ### Confidence
 
-| Level | When |
+`high` requires all of the following. Anything short of it is `medium`; this
+check never emits `low`.
+
+| Requirement | Why |
 | --- | --- |
-| `high` | Full-window coverage, every sample zero |
-| `medium` | Coverage above the floor but not the whole window, or the pod is younger than the window |
-| `low` | Coverage close to the floor — enough to report, not enough to act on without looking |
+| Sample coverage at or above 95% | A gap wide enough to hide a working period |
+| A power series exists for every device | One sensor agreeing with itself is not corroboration |
+| Mean power draw below the idle fraction of TDP | A device drawing real power is doing something the utilization metric did not see |
+| Zero throughout the window, or a fallow span of at least half of it | A short run of zeroes near the end of a long window leans on the query resolution |
 
 `--min-confidence` (default `medium`) sets what is shown. Raise it to `high`
-when you are about to act in bulk.
+when you are about to act in bulk. Power draw is what separates "the metric
+says zero" from "the device is demonstrably doing nothing", so a cluster with
+no power series will not produce a `high`-confidence idle-pod finding at all.
 
 ## What it does not mean
 

@@ -674,3 +674,171 @@ covered it.
 
 Re-run the kind E2E — the kube and scan paths moved materially — re-tag from a
 clean tree, and push so CI and the release workflow run for the first time.
+
+## Report, and five wrong numbers
+
+### Goal
+
+Give the scan something to hand to the person who has to approve the change,
+and then answer a question that had not been asked properly: are the numbers on
+it actually right?
+
+### `--output html`
+
+A single self-contained file. No network requests, no scripts required to read
+it, byte-identical for the same input.
+
+It opens with a capacity ledger that accounts for the whole window — what could
+not be analysed, what is idle by design, what was suppressed, what was flagged,
+and what is left — because a headline figure that cannot be checked against its
+own parts is asking to be taken on trust, and nobody approves a change on
+trust. The ledger refuses to draw itself if the parts do not sum to the paid
+total within one accelerator-second, and says so where the chart would be.
+
+The residual bucket is called **Unflagged**, not "used" or "productive". ullage
+did not measure that capacity working; it measured that it did not flag it. A
+test pins the wording, because the temptation to make the green bar mean
+something flattering will come back.
+
+`--redact` replaces namespaces, workload names and owner identities everywhere
+they appear — including inside summaries, `kubectl` commands and link anchors —
+so a report can leave the cluster it describes.
+
+### Redaction had to be rewritten before it worked
+
+The first version masked named fields. It leaked on its first run, and would
+have kept leaking: field-by-field redaction protects the fields someone
+remembered and silently misses the next one added, along with every name
+embedded in a sentence or a command — which is where most of them are.
+
+The second version harvests identifiers from the scan result and rewrites every
+string in the finished document. Three real leaks surfaced only by reading the
+output:
+
+- The sweep ate the stylesheet, because CSS is a string too. Trusted template
+  types are now exempt, and a test names a workload `dark` to keep it that way.
+- `:` in the token class merged `jupyter-alice:` into one token, so it never
+  matched.
+- Slug anchors join names with hyphens into one opaque token that no
+  whole-token replacement can take apart, so `id="cmd-idle-pod-research-jupyter-alice"`
+  republished exactly what the flag was asked to remove. Anchors are ordinals
+  under `--redact`.
+
+### The five wrong numbers
+
+Found by audit, then independently reproduced with matching figures before any
+of them were touched — previous audits of this repo have been confidently
+wrong, and a fix applied to a bug that does not exist is just a new bug.
+
+- **stuck-pod multiplied instead of summing.** Group hours were the longest
+  duration times the total device count. 337 accelerator-hours reported as 672.
+- **unused-node rescaled after summing.** One node older than the window pulled
+  every node in its pool down proportionally: 504 hours reported as 420.
+- **Terminal pods counted as holding accelerators.** A `Failed` pod has no
+  running containers and the kubelet has already released its devices. `Pending`
+  is still included deliberately — a pod that cannot start is often exactly the
+  one holding a reservation.
+- **Native sidecars left out of the effective request.** Upstream adds running
+  restartable-init containers to each ordinary init container before taking the
+  maximum; a plain maximum understates a pod with a GPU sidecar.
+- **MIG under the single strategy was counted in cards.** The device plugin
+  advertises instances as plain `nvidia.com/gpu` and rewrites `gpu.count` to
+  match, so an 8-card node split seven ways is arithmetically identical to 56
+  A100s — and was billed that way in the paid total on the front page.
+  Time-slicing has a divisor to undo and this has none, so the count is
+  genuinely unknown and is now recorded as unknown rather than guessed at. The
+  instances stay visible in the MIG exclusion.
+
+Every one has a test that fails when the fix is reverted.
+
+### The example scripts were broken on Linux
+
+`tour.sh` used `mktemp -t ullage-tour`, which is BSD syntax; GNU `mktemp`
+rejects it with "too few X's". The tour is what the release workflow runs, so
+it had never passed on CI — and it has never been pushed, so nothing said so.
+Reproduced under `golang:1.24`, fixed, and re-run there.
+
+It also wrapped every command in `|| true`. ullage exits 1 whenever it finds
+something, which is every interesting step, so some tolerance is needed — but a
+blanket one also swallows 127 for a missing binary and 2 for a failed scan, and
+the tour then "passes" while printing nothing but shell errors.
+
+`weekly-digest.sh` divided by `.scan.gpuHoursPaid // 1`. jq's `//` catches null,
+not zero, so a cluster with nothing analysable — every node excluded, or an
+exporter with no series — aborted the whole program. That is precisely the
+cluster someone would run the digest against to find out why.
+
+`ci-gate.sh` is configured by environment and silently ignored anything
+positional, so `ci-gate.sh --demo` looked like it had been honoured.
+
+### Claims that were checked and left alone
+
+Not every audit finding survived contact with the code. `GOVERNANCE.md` was
+alleged to overstate its structure and does not — it says it is deliberately
+modest and points at `MAINTAINERS.md` for the actual list. The shipped RBAC was
+alleged to be incomplete and covers every resource the code requests.
+
+### What the RBAC genuinely cannot cover
+
+The owner walk follows whatever `ownerReferences` point at, and on a GPU
+cluster that is usually a custom resource — `PyTorchJob`, `RayCluster`,
+`Workflow`. `deploy/rbac.yaml` cannot know about those, so the lookup is
+refused, the chain truncates, and the fix correctly degrades to no command.
+
+Correct, and useless: the reader cannot tell "we are not allowed to read this"
+from "this cannot be known", and only one of those is fixed by editing a Role.
+Refusals are now collected and reported as a warning naming the kind in the
+form an RBAC rule uses. A 404 is deliberately not reported this way — Job pods
+outlive their Jobs routinely, and sending someone to fix a Role that is already
+correct is its own failure.
+
+### Documentation that described software that does not exist
+
+`docs/checks/idle-pod.md` claimed the check requires every sample in the window
+to be zero. It does not, and the code says so in a comment: the claim is about
+the trailing run of zeroes, because a rule demanding zero across the whole
+window misses more the longer the window gets. The doc also invented a `low`
+confidence tier this check never emits, and described the coverage floor as
+window-relative when it is measured over the pod's own lifetime — the exact
+detail that keeps a week-old forgotten notebook reportable.
+
+`CODE_OF_CONDUCT.md` is the CNCF text, which routes reports to the Kubernetes
+and CNCF committees. ullage is neither, so both would bounce a report — costing
+someone time they do not have in the middle of an incident. Adoption of the
+wording is now stated as a standard held to, not an affiliation, and reports go
+to the maintainer. That there is only one maintainer, and therefore nobody to
+escalate to, is said out loud rather than left to be discovered.
+
+`SECURITY.md` promised acknowledgement in 5 working days from a project
+maintained by one person in their spare time. A reporter told five days and
+hearing nothing cannot distinguish a busy maintainer from a lost report, so the
+guarantee is replaced with what can actually be honoured, plus a way to
+escalate that does not disclose the vulnerability.
+
+`CONTRIBUTING.md` mandates a DCO sign-off that none of the 53 commits before it
+carry and that nothing in CI enforces.
+
+### Failed attempts
+
+- Mutation-testing the "deleted owner is not a permissions gap" test passed
+  when it should have failed. The shared fixture returned the same ReplicaSet
+  whatever name it was asked for, so the test never reached a 404 at all. The
+  fixture honours names now.
+- An apostrophe in a comment inside a single-quoted jq program terminated the
+  string and broke the script.
+- One expectation in the sidecar test was simply wrong — a sidecar that follows
+  an ordinary init container has not started while it runs. The test was
+  corrected, not the code.
+
+### Files changed
+
+`internal/render/{html,ledger,redact}.go` and assets, `internal/check/{stuckpod,
+unusednode}.go`, `internal/kube/types.go`, `internal/inventory/inventory.go`,
+`internal/scan/{provenance,gather}.go`, `cmd/ullage/main.go`, `examples/*.sh`,
+`deploy/rbac.yaml`, `README.md`, `docs/checks/{idle-pod,unused-node}.md`,
+`SECURITY.md`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, and tests for all of it.
+
+### Next
+
+Push. Nothing here has ever run on CI, which is how a BSD-only `mktemp` reached
+a release workflow in the first place.

@@ -239,6 +239,15 @@ func (g *Gatherer) Gather(ctx context.Context, opts Options) (*inventory.Cluster
 	for i := range pods {
 		cl.Pods = append(cl.Pods, g.podView(ctx, resolver, &pods[i], nsByName, pdbs, pdbErr == nil, draByPod, end))
 	}
+	// A refused owner lookup is a permissions gap, not an unknowable owner,
+	// and the difference decides what the reader does next: grant a read, or
+	// go and ask around. Naming the kind makes the RBAC edit obvious.
+	if denied := resolver.Denied(); len(denied) > 0 {
+		warnings = append(warnings, fmt.Sprintf(
+			"owner lookups were refused for %s, so those workloads are attributed to the "+
+				"deepest owner readable and offered no automatic fix. Grant \"get\" on them "+
+				"to name the real owner: see deploy/rbac.yaml", strings.Join(denied, ", ")))
+	}
 	for name, ni := range inv.Nodes {
 		kpool, _ := kube.NodePoolOf(ni.Node)
 		cl.Nodes = append(cl.Nodes, inventory.NodeView{
