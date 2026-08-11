@@ -62,7 +62,7 @@ func runningPod(ns, name, node string, gpus int) inventory.PodView {
 		Phase:        "Running",
 		Accelerators: gpus,
 		StartTime:    &start,
-		Provenance:   api.Provenance{Controlled: false, Recognised: true, RootKind: "Pod", RootName: name},
+		Provenance:   api.Provenance{Controlled: false, Recognized: true, RootKind: "Pod", RootName: name},
 	}
 }
 
@@ -182,7 +182,7 @@ func TestIdlePodGroupsByRootOwner(t *testing.T) {
 	for i, name := range []string{"jupyter-0", "jupyter-1", "jupyter-2"} {
 		p := runningPod("research", name, "node-a", 1)
 		p.Provenance = api.Provenance{
-			Controlled: true, Recognised: true,
+			Controlled: true, Recognized: true,
 			RootKind: "StatefulSet", RootName: "jupyter", APIVersion: "apps/v1",
 		}
 		pods = append(pods, p)

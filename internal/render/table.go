@@ -44,6 +44,12 @@ func Table(w io.Writer, res *api.Result, o Options) error {
 		p.line("  No recommendations. Nothing in this cluster held an accelerator")
 		p.line("  without using it for the whole window.")
 		p.line("")
+		// ByDesign findings are how a suppressed-by-intent decision "stays
+		// visible" (see Finding.ByDesign). Skipping this call here meant a
+		// cluster with zero waste findings but non-empty ByDesign entries
+		// printed "No recommendations" and never showed them at all — the
+		// exact opposite of what ByDesign exists for.
+		p.renderByDesign(res)
 		p.renderContext(res)
 		p.footerNoFindings(res)
 		return p.err
@@ -333,13 +339,29 @@ func plural(n int, word string) string {
 	return fmt.Sprintf("%d %ss", n, word)
 }
 
+// hours formats an accelerator-hour count for people.
+//
+// Small values keep their significant figures. Rounding everything below one to
+// "0" made a short window print "0 of 0 accelerator-hours fallow (75%)", where
+// the two numbers contradict the percentage sitting between them -- and a short
+// window is exactly what someone trying the tool for the first time reaches for.
 func hours(h float64) string {
 	switch {
 	case h >= 10000:
 		return fmt.Sprintf("%.0fk", h/1000)
 	case h >= 1000:
 		return fmt.Sprintf("%.1fk", h/1000)
+	case h >= 10:
+		return fmt.Sprintf("%.0f", h)
+	case h >= 1:
+		return strings.TrimSuffix(fmt.Sprintf("%.1f", h), ".0")
+	case h > 0:
+		return fmt.Sprintf("%.2g", h)
+	case h == 0:
+		return "0"
 	default:
+		// A negative accelerator-hour count is impossible, so it means an
+		// accounting bug upstream. Printing it is how anyone finds out.
 		return fmt.Sprintf("%.0f", h)
 	}
 }
@@ -360,15 +382,22 @@ func currencySymbol(c string) string {
 }
 
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	if n <= 0 {
+		return ""
+	}
+	// Counted and sliced in runes, not bytes: a workload or namespace name can
+	// contain multi-byte UTF-8, and slicing at a byte offset can land inside a
+	// rune, emitting invalid UTF-8 into the table instead of a shortened name.
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
 	if n <= 1 {
-		return s[:n]
+		return string(r[:n])
 	}
 	// Elide from the left: the tail of a workload reference is more
 	// identifying than its head.
-	return "…" + s[len(s)-n+1:]
+	return "…" + string(r[len(r)-n+1:])
 }
 
 func sortedKeys(m map[string]int) []string {

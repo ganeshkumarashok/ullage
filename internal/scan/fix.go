@@ -3,6 +3,7 @@ package scan
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/ullage-project/ullage/internal/check"
 	"github.com/ullage-project/ullage/internal/inventory"
@@ -21,10 +22,37 @@ type Provider interface {
 	ScaleNodePool(pool string, min int) (command string, ok bool)
 }
 
-var providers = map[string]Provider{}
+var (
+	providerMu sync.RWMutex
+	providers  = map[string]Provider{}
+)
 
 // RegisterProvider adds a cloud provider renderer.
-func RegisterProvider(p Provider) { providers[p.ID()] = p }
+//
+// A duplicate ID panics rather than overwriting, matching check.Register. Last
+// write wins was the worst possible behaviour for this seam: an integrator's
+// provider would silently replace the built-in one, or be silently replaced by
+// it, and the only symptom would be a remediation command that is confidently
+// wrong for the cloud the user is actually running on.
+func RegisterProvider(p Provider) {
+	providerMu.Lock()
+	defer providerMu.Unlock()
+	id := p.ID()
+	if id == "" {
+		panic("provider registered without an ID")
+	}
+	if _, dup := providers[id]; dup {
+		panic(fmt.Sprintf("provider %q registered twice", id))
+	}
+	providers[id] = p
+}
+
+func providerFor(id string) (Provider, bool) {
+	providerMu.RLock()
+	defer providerMu.RUnlock()
+	p, ok := providers[id]
+	return p, ok
+}
 
 func init() {
 	RegisterProvider(azure{})
@@ -115,7 +143,7 @@ func poolFix(cl *inventory.Cluster, rf check.RawFinding, desc check.Descriptor) 
 			break
 		}
 	}
-	if p, ok := providers[provider]; ok {
+	if p, ok := providerFor(provider); ok {
 		if cmd, ok := p.ScaleNodePool(rf.Subject.Pool, 0); ok {
 			fix.Command = cmd
 			fix.Rationale = "Nothing blocks scale-down, so the pool's minimum size is holding these " +

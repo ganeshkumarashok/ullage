@@ -64,6 +64,27 @@ func (o *Options) Defaults() {
 	}
 }
 
+// EffectiveParams reports the settings a scan would actually run with, so that
+// every code path emitting a Result describes itself the same way — including
+// the early return for a cluster with no accelerators at all.
+func EffectiveParams(opts Options) api.Params {
+	opts.Defaults()
+	p := api.Params{
+		IdleThreshold:  api.ISODuration(opts.IdleThreshold),
+		StuckThreshold: api.ISODuration(opts.StuckThreshold),
+		MinConfidence:  opts.MinConfidence,
+		Step:           api.ISODuration(opts.Step),
+		Checks:         []string{},
+	}
+	if checks, err := check.Selected(opts.Checks); err == nil {
+		for _, c := range checks {
+			p.Checks = append(p.Checks, c.Describe().ID)
+		}
+		sort.Strings(p.Checks)
+	}
+	return p
+}
+
 // Analyse runs the checks over a cluster fact view and enriches what they find.
 //
 // Checks detect; this function decides. Ownership, provenance, the fix command,
@@ -72,6 +93,17 @@ func (o *Options) Defaults() {
 func Analyse(ctx context.Context, cl *inventory.Cluster, inv *inventory.Inventory, opts Options) (*api.Result, error) {
 	opts.Defaults()
 
+	// Resolve the check set before the result is built so params can record
+	// what actually ran. An empty list means "all of them", so recording the
+	// request verbatim wrote `"checks": []` on the default invocation -- which
+	// tells a consumer nothing, and silently changes meaning the day a fourth
+	// check ships, making two results incomparable across versions.
+	checks, err := check.Selected(opts.Checks)
+	if err != nil {
+		return nil, err
+	}
+	effectiveParams := EffectiveParams(opts)
+
 	res := &api.Result{
 		APIVersion: api.Version,
 		Scan: api.ScanMeta{
@@ -79,16 +111,10 @@ func Analyse(ctx context.Context, cl *inventory.Cluster, inv *inventory.Inventor
 			Context: cl.Context,
 			Started: cl.Now,
 			Window:  api.ISODuration(cl.Window),
-			Params: api.Params{
-				IdleThreshold:  api.ISODuration(opts.IdleThreshold),
-				StuckThreshold: api.ISODuration(opts.StuckThreshold),
-				MinConfidence:  opts.MinConfidence,
-				Step:           api.ISODuration(opts.Step),
-				// Never nil: a JSON null here is a crash in any consumer that
-				// asks for its length, and it appears only on the default
-				// invocation — the one nobody tests against.
-				Checks: append([]string{}, opts.Checks...),
-			},
+			// Never nil, and never the request verbatim: an empty --checks
+			// means "all of them", so a consumer reading `[]` learns nothing
+			// and two results stop being comparable the day a check is added.
+			Params:               effectiveParams,
 			PodLabelSchema:       cl.PodLabelSchema,
 			AcceleratorsObserved: inv.Observed,
 			AcceleratorsAnalyzed: inv.Analyzed,
@@ -105,11 +131,16 @@ func Analyse(ctx context.Context, cl *inventory.Cluster, inv *inventory.Inventor
 	if res.NotAnalyzed == nil {
 		res.NotAnalyzed = []api.Exclusion{}
 	}
+	// Belt and braces for the ordering above: exclusions are assembled by
+	// several packages, and a stable document is worth more than the order any
+	// one of them happened to append in.
+	sort.SliceStable(res.NotAnalyzed, func(i, j int) bool {
+		if res.NotAnalyzed[i].Code != res.NotAnalyzed[j].Code {
+			return res.NotAnalyzed[i].Code < res.NotAnalyzed[j].Code
+		}
+		return res.NotAnalyzed[i].Detail < res.NotAnalyzed[j].Detail
+	})
 
-	checks, err := check.Selected(opts.Checks)
-	if err != nil {
-		return nil, err
-	}
 	params := check.Params{
 		IdleThreshold:  opts.IdleThreshold,
 		StuckThreshold: opts.StuckThreshold,
@@ -224,7 +255,7 @@ func enrich(cl *inventory.Cluster, rf check.RawFinding, opts Options) api.Findin
 		f.OwnershipConfidence = api.OwnerResolved
 		f.Provenance = api.Provenance{
 			Controlled: true, RootKind: "NodePool",
-			RootName: rf.Subject.Pool, Recognised: true,
+			RootName: rf.Subject.Pool, Recognized: true,
 		}
 		f.Accelerators = acceleratorsForNodes(cl, rf.Subject.Nodes)
 		f.Fix = poolFix(cl, rf, desc)

@@ -7,7 +7,7 @@ apiVersion: v1
 kind: Pod
 metadata: {name: llama-train-0, namespace: ml}
 spec:
-  nodeSelector: {kubernetes.io/hostname: aks-nodepool1-21098950-vmss000000}
+  nodeSelector: {kubernetes.io/hostname: __NODE0__}
   containers:
   - name: trainer
     image: registry.k8s.io/pause:3.10
@@ -18,7 +18,7 @@ apiVersion: v1
 kind: Pod
 metadata: {name: idle-notebook-0, namespace: ml}
 spec:
-  nodeSelector: {kubernetes.io/hostname: aks-nodepool1-21098950-vmss000000}
+  nodeSelector: {kubernetes.io/hostname: __NODE0__}
   containers:
   - name: notebook
     image: registry.k8s.io/pause:3.10

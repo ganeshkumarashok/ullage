@@ -58,7 +58,22 @@ type Suppression struct {
 
 // File is the parsed contents of .ullage.yaml.
 type File struct {
+	// Version lets a future format change branch instead of hard-failing. It
+	// is unused today and deliberately so: reserving it now costs nothing,
+	// while adding it later means the first file that carries it is rejected
+	// by every binary already in the field.
+	Version int `yaml:"version,omitempty"`
+
 	Suppress []Suppression `yaml:"suppress"`
+
+	// Extensions collects any top-level `x-` key and ignores it.
+	//
+	// This file is committed and shared, so strictness has an asymmetric cost:
+	// without an escape hatch, the day a newer ullage writes a new top-level
+	// field, every older binary reading that file produces no report at all —
+	// not a degraded one, none. The `x-` prefix keeps typo protection for
+	// everything else, because `resaon:` is still an error.
+	Extensions map[string]any `yaml:",inline"`
 }
 
 // Suppressions is a compiled, queryable suppression list.
@@ -101,6 +116,13 @@ func Parse(raw []byte, p string, now time.Time) (*Suppressions, error) {
 	dec.KnownFields(true)
 	if err := dec.Decode(&f); err != nil && err.Error() != "EOF" {
 		return nil, fmt.Errorf("parsing %s: %w", p, err)
+	}
+
+	for k := range f.Extensions {
+		if !strings.HasPrefix(k, "x-") {
+			return nil, fmt.Errorf("parsing %s: unknown field %q; "+
+				"prefix a key with `x-` if it is meant for another tool", p, k)
+		}
 	}
 
 	s := &Suppressions{path: p, used: map[string]bool{}}

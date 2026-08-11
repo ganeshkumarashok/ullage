@@ -143,10 +143,24 @@ func Scan(ctx context.Context, opts Options) (*api.Result, error) {
 		return nil, err
 	}
 	if cluster == nil {
-		// No accelerators anywhere. That is a complete, correct answer.
+		// No accelerators anywhere. That is a complete, correct answer, and it
+		// has to satisfy the same contract as a full one: a cluster with no
+		// GPUs is exactly where a consumer iterating scan.params.checks or
+		// warnings hits a null, and it was the one path the shape test never
+		// reached because the fixture it runs against has GPUs.
+		if warnings == nil {
+			warnings = []string{}
+		}
 		return &api.Result{
-			APIVersion:      api.Version,
-			Scan:            api.ScanMeta{Tool: api.Tool{Name: "ullage", Version: opts.Version}, Context: kc.Context(), Started: so.Now, Window: api.ISODuration(so.Window)},
+			APIVersion: api.Version,
+			Scan: api.ScanMeta{
+				Tool:          api.Tool{Name: "ullage", Version: opts.Version},
+				Context:       kc.Context(),
+				Started:       so.Now,
+				Window:        api.ISODuration(so.Window),
+				Params:        scan.EffectiveParams(so),
+				PrometheusURL: pc.URL(),
+			},
 			Recommendations: []api.Finding{},
 			Suppressed:      []api.Finding{},
 			NotAnalyzed:     []api.Exclusion{},

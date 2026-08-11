@@ -41,7 +41,7 @@ byDesign[].provenance.chain[].apiVersion string
 byDesign[].provenance.chain[].kind string
 byDesign[].provenance.chain[].name string
 byDesign[].provenance.controlled boolean
-byDesign[].provenance.recognised boolean
+byDesign[].provenance.recognized boolean
 byDesign[].provenance.rootKind string
 byDesign[].provenance.rootName string
 byDesign[].rank integer
@@ -104,7 +104,7 @@ recommendations[].provenance.chain[].apiVersion string
 recommendations[].provenance.chain[].kind string
 recommendations[].provenance.chain[].name string
 recommendations[].provenance.controlled boolean
-recommendations[].provenance.recognised boolean
+recommendations[].provenance.recognized boolean
 recommendations[].provenance.rootKind string
 recommendations[].provenance.rootName string
 recommendations[].rank integer
@@ -181,7 +181,7 @@ suppressed[].provenance.chain[].apiVersion string
 suppressed[].provenance.chain[].kind string
 suppressed[].provenance.chain[].name string
 suppressed[].provenance.controlled boolean
-suppressed[].provenance.recognised boolean
+suppressed[].provenance.recognized boolean
 suppressed[].provenance.rootKind string
 suppressed[].provenance.rootName string
 suppressed[].rank integer

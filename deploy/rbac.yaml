@@ -35,31 +35,36 @@ rules:
 
   # Controllers, walked to find the root owner of an idle pod. Without this the
   # recommendation is "delete this pod", which a controller undoes in seconds.
+  #
+  # "get" and not "list": the owner walk resolves one named object at a time
+  # from an ownerReference. ullage never enumerates the controllers in your
+  # cluster, so it does not ask to.
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "replicasets", "daemonsets"]
-    verbs: ["get", "list"]
+    verbs: ["get"]
   - apiGroups: ["batch"]
     resources: ["jobs", "cronjobs"]
-    verbs: ["get", "list"]
+    verbs: ["get"]
 
   # Dynamic Resource Allocation. A ResourceClaim reserves whole devices and
   # leaves no extended resource in the pod spec, so without this a node full of
   # DRA workloads reads as empty.
   - apiGroups: ["resource.k8s.io"]
-    resources: ["resourceclaims", "resourceclaimtemplates", "deviceclasses"]
+    resources: ["resourceclaims"]
     verbs: ["get", "list"]
 
   # Karpenter, which expresses "do not remove this capacity" through NodePools
   # rather than through a minimum size.
   - apiGroups: ["karpenter.sh"]
-    resources: ["nodepools", "nodeclaims"]
+    resources: ["nodepools"]
     verbs: ["get", "list"]
 
-  # Discovery, so an owner chain ending in a CRD — a Kubeflow Notebook, a
-  # RayCluster — can be named rather than reported as an opaque UID.
-  - apiGroups: ["apiextensions.k8s.io"]
-    resources: ["customresourcedefinitions"]
-    verbs: ["get", "list"]
+  # An owner chain ending in a custom resource — a Kubeflow Notebook, a
+  # RayCluster — is named by fetching that object, which needs read access to
+  # that resource in its own API group. Grant it yourself if you want those
+  # owners named; ullage degrades to reporting the last owner it could read
+  # rather than failing. Kind-to-resource discovery uses the aggregated
+  # /apis endpoints, which need no RBAC, so no permission is requested here.
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

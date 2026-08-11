@@ -46,9 +46,15 @@ func Explain(w io.Writer, f *api.Finding, res *api.Result, o Options) error {
 		p.field("Peak utilization", "%.0f%% across the whole window", f.Evidence.UtilizationMax)
 	}
 	if f.Evidence.PowerDrawWatts > 0 {
-		if f.Evidence.PowerDrawTDPRatio > 0 {
+		if f.Evidence.PowerDrawTDPRatio > 0 && len(f.Accelerators) > 0 {
 			p.field("Power draw", "%.0f W mean (%.0f%% of %.0f W TDP)",
 				f.Evidence.PowerDrawWatts, f.Evidence.PowerDrawTDPRatio*100, f.Accelerators[0].TDPWatts)
+		} else if f.Evidence.PowerDrawTDPRatio > 0 {
+			// No accelerator entry to read a TDP from (should not happen for a
+			// real finding, but indexing Accelerators[0] unconditionally used
+			// to panic the whole explain screen if it ever did).
+			p.field("Power draw", "%.0f W mean (%.0f%% of TDP)",
+				f.Evidence.PowerDrawWatts, f.Evidence.PowerDrawTDPRatio*100)
 		} else {
 			p.field("Power draw", "%.0f W mean", f.Evidence.PowerDrawWatts)
 		}
@@ -74,11 +80,17 @@ func Explain(w io.Writer, f *api.Finding, res *api.Result, o Options) error {
 		p.field("Held", "%d × %s (%s)", a.Count, a.Model, a.Allocation)
 	}
 	p.field("Fallow", "%s accelerator-hours", hours(f.Impact.GPUHoursFallow))
-	if f.Impact.WindowCost != nil {
+	if f.Impact.WindowCost != nil && len(f.Accelerators) > 0 {
 		p.field("Cost", "~%s%s over the window",
 			currencySymbol(f.Impact.Currency), money(*f.Impact.WindowCost))
 		p.dim("                 %s rate for %s; ullage never blends rates across models",
 			f.Impact.PricingSource, f.Accelerators[0].Model)
+	} else if f.Impact.WindowCost != nil {
+		// A cost with no accelerator to name the model of: still show the
+		// figure rather than crash, since indexing Accelerators[0]
+		// unconditionally used to panic the whole explain screen.
+		p.field("Cost", "~%s%s over the window",
+			currencySymbol(f.Impact.Currency), money(*f.Impact.WindowCost))
 	} else if len(f.Accelerators) > 1 {
 		p.dim("    No cost shown: this finding spans more than one accelerator model,")
 		p.dim("    and a blended rate would be a fabricated number.")
@@ -95,7 +107,7 @@ func Explain(w io.Writer, f *api.Finding, res *api.Result, o Options) error {
 		if len(f.Provenance.Chain) > 1 {
 			p.field("Chain", "pod → %s", chainString(f.Provenance.Chain))
 		}
-		if !f.Provenance.Recognised {
+		if !f.Provenance.Recognized {
 			p.dim("    %s is not a workload kind ullage understands.", f.Provenance.RootKind)
 		}
 	}

@@ -13,6 +13,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -69,11 +70,100 @@ func (d ISODuration) MarshalJSON() ([]byte, error) {
 	return json.Marshal(ISO8601(time.Duration(d)))
 }
 
+// UnmarshalJSON reads back what MarshalJSON wrote.
+//
+// Without this, the published types cannot decode the published documents:
+// json.Unmarshal would try to read the string "P14D" into an int64 and fail on
+// the first duration field, so every embedder named at the top of this file
+// would have had to write its own decoder or fork the type. A contract that
+// can only be written and not read is not a contract.
+func (d *ISODuration) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return fmt.Errorf("duration must be an ISO-8601 string such as \"P14D\": %w", err)
+	}
+	v, err := ParseISO8601(s)
+	if err != nil {
+		return err
+	}
+	*d = ISODuration(v)
+	return nil
+}
+
+// ParseISO8601 parses the durations ISO8601 emits: an optional day component
+// and an optional time component of hours, minutes and seconds.
+//
+// Weeks, months and years are deliberately rejected. A month is not a fixed
+// number of hours, and no claim this tool makes about accelerator time may
+// rest on a unit whose length depends on when you asked.
+func ParseISO8601(s string) (time.Duration, error) {
+	bad := func() (time.Duration, error) {
+		return 0, fmt.Errorf("%q is not an ISO-8601 duration (want e.g. P14D, PT6H30M, PT0S)", s)
+	}
+	if len(s) < 3 || s[0] != 'P' {
+		return bad()
+	}
+	rest := s[1:]
+
+	var total time.Duration
+	var inTime, sawAny, sawTimePart bool
+	for len(rest) > 0 {
+		if rest[0] == 'T' {
+			if inTime {
+				return bad()
+			}
+			inTime = true
+			rest = rest[1:]
+			continue
+		}
+		i := 0
+		for i < len(rest) && rest[i] >= '0' && rest[i] <= '9' {
+			i++
+		}
+		if i == 0 || i == len(rest) {
+			return bad()
+		}
+		n, err := strconv.Atoi(rest[:i])
+		if err != nil {
+			return bad()
+		}
+		var unit time.Duration
+		switch c := rest[i]; {
+		case c == 'D' && !inTime:
+			unit = 24 * time.Hour
+		case c == 'H' && inTime:
+			unit = time.Hour
+		case c == 'M' && inTime:
+			unit = time.Minute
+		case c == 'S' && inTime:
+			unit = time.Second
+		default:
+			// Includes W, Y, and a bare M outside the time part, which is
+			// months. Ambiguous units are refused rather than guessed.
+			return bad()
+		}
+		total += time.Duration(n) * unit
+		sawAny = true
+		sawTimePart = sawTimePart || inTime
+		rest = rest[i+1:]
+	}
+	// A bare "T" with nothing after it, as in P1DT, is malformed rather than
+	// harmless: it usually means a component was dropped somewhere upstream.
+	if !sawAny || (inTime && !sawTimePart) {
+		return bad()
+	}
+	return total, nil
+}
+
 // Duration returns the underlying duration.
 func (d ISODuration) Duration() time.Duration { return time.Duration(d) }
 
-// ISO8601 renders a duration as e.g. P13DT21H. Sub-minute precision is dropped
-// deliberately: no claim in this tool is meaningful below the minute.
+// ISO8601 renders a duration as e.g. P13DT21H.
+//
+// Seconds are emitted only when they are non-zero. Windows and thresholds are
+// always whole minutes, but --step may legitimately be finer, and rounding it
+// away would make the params block claim a step of zero -- a number that
+// cannot reproduce the scan it claims to describe.
 func ISO8601(d time.Duration) string {
 	if d <= 0 {
 		return "PT0S"
@@ -83,19 +173,24 @@ func ISO8601(d time.Duration) string {
 	hours := int(rem / time.Hour)
 	rem %= time.Hour
 	mins := int(rem / time.Minute)
+	rem %= time.Minute
+	secs := int(rem / time.Second)
 
 	var b strings.Builder
 	b.WriteString("P")
 	if days > 0 {
 		fmt.Fprintf(&b, "%dD", days)
 	}
-	if hours > 0 || mins > 0 {
+	if hours > 0 || mins > 0 || secs > 0 {
 		b.WriteString("T")
 		if hours > 0 {
 			fmt.Fprintf(&b, "%dH", hours)
 		}
 		if mins > 0 {
 			fmt.Fprintf(&b, "%dM", mins)
+		}
+		if secs > 0 {
+			fmt.Fprintf(&b, "%dS", secs)
 		}
 	}
 	if b.Len() == 1 {
@@ -170,7 +265,11 @@ type Provenance struct {
 	RootKind   string `json:"rootKind,omitempty"`
 	RootName   string `json:"rootName,omitempty"`
 	APIVersion string `json:"apiVersion,omitempty"`
-	Recognised bool   `json:"recognised"`
+	// Recognized reports whether the root controller is a kind whose removal
+	// semantics ullage knows. Spelled the American way, like analyzed and
+	// utilization elsewhere in this contract: consumers hard-code these
+	// strings, so one dialect is worth more than any one spelling.
+	Recognized bool `json:"recognized"`
 
 	// Chain is typed rather than prose because consumers will read it, and a
 	// slice of formatted strings is an invitation to parse them back.

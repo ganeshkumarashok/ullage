@@ -24,12 +24,20 @@ func ParseDuration(s string) (time.Duration, error) {
 		return 0, fmt.Errorf("empty duration")
 	}
 
+	orig := s
 	neg := false
 	switch s[0] {
 	case '-':
 		neg, s = true, s[1:]
 	case '+':
 		s = s[1:]
+	}
+	if s == "" {
+		// A bare sign with nothing after it (`-` or `+`) is not a duration.
+		// Without this check it fell through to the loop below untouched,
+		// which never runs and never errors, so it silently returned a zero
+		// duration instead of rejecting the input.
+		return 0, fmt.Errorf("invalid duration %q", orig)
 	}
 
 	var total time.Duration

@@ -1,3 +1,5 @@
-/ullage
-/dist/
 .ullage.yaml
+/dist/
+/ullage
+bin/
+coverage.out

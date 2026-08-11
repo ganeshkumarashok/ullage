@@ -333,7 +333,18 @@ func Build(nodes []kube.Node, draByNode map[string]int) *Inventory {
 		}
 	}
 
-	for kind, b := range shared {
+	// Iterate in a fixed order. Ranging over the map directly meant two scans
+	// of the same cluster emitted the exclusions in different orders, so the
+	// output of a tool that asks to be trusted with reproducible numbers did
+	// not reproduce -- and neither did its JSON, which people diff in CI.
+	kinds := make([]string, 0, len(shared))
+	for k := range shared {
+		kinds = append(kinds, k)
+	}
+	sortStrings(kinds)
+
+	for _, kind := range kinds {
+		b := shared[kind]
 		pools := make([]string, 0, len(b.pools))
 		for p := range b.pools {
 			pools = append(pools, p)

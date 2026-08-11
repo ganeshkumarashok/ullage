@@ -231,9 +231,18 @@ func (f *flags) options() (ullage.Options, error) {
 			}
 		}
 	}
-	prices, err := pricing.Load(f.pricing)
-	if err != nil {
-		return ullage.Options{}, err
+	// --no-cost is honoured here rather than in the renderer. Stripping money
+	// at the point it is displayed left the JSON output, the pricing block and
+	// the per-row figures untouched, so a user who ran --no-cost before sharing
+	// a report with finance published exactly the numbers they meant to remove.
+	// Never loading the rates means no cost can be emitted by any surface.
+	var prices *api.Pricing
+	if !f.noCost {
+		p, err := pricing.Load(f.pricing)
+		if err != nil {
+			return ullage.Options{}, err
+		}
+		prices = p
 	}
 
 	return ullage.Options{
@@ -262,6 +271,13 @@ func (f *flags) options() (ullage.Options, error) {
 func cmdScan(ctx context.Context, args []string, override func(*ullage.Options)) error {
 	f := newFlags("ullage")
 	if err := f.fs.Parse(args); err != nil {
+		// `--help` is the first thing most people type. Letting it fall through
+		// to the error path greeted them with an error-styled line and exit 2,
+		// which breaks `ullage --help && ...` and any CI smoke test.
+		if errors.Is(err, flag.ErrHelp) {
+			fmt.Print(usage)
+			return nil
+		}
 		return fmt.Errorf("%v\n\n%s", err, usage)
 	}
 	opts, err := f.options()
@@ -270,6 +286,9 @@ func cmdScan(ctx context.Context, args []string, override func(*ullage.Options))
 	}
 	if override != nil {
 		override(&opts)
+	}
+	if err := validateWindow(f); err != nil {
+		return err
 	}
 	if opts.Prometheus.URL == "" {
 		if env := os.Getenv("ULLAGE_PROMETHEUS"); env != "" {
@@ -293,7 +312,7 @@ func cmdScan(ctx context.Context, args []string, override func(*ullage.Options))
 		fmt.Fprint(os.Stderr, "\r\033[K")
 	}
 	if scanErr != nil {
-		return scanErr
+		return withDoctorHint(scanErr, opts.Prometheus.URL)
 	}
 
 	if f.explainQ {
@@ -303,6 +322,62 @@ func cmdScan(ctx context.Context, args []string, override func(*ullage.Options))
 		return nil
 	}
 	return emit(res, f)
+}
+
+// withDoctorHint attaches the one next step that actually resolves connection
+// failures. `doctor` diagnoses these cases well -- it even spots a URL with
+// /api/v1 on the end -- but the scan is the command people run first, and it
+// used to hand back raw Go transport errors with nowhere to go from there.
+func withDoctorHint(err error, promURL string) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "404"):
+		msg += "\n\n→ that endpoint answered, but not as Prometheus." +
+			"\n  The URL should be the server root; it should not include /api/v1."
+	case strings.Contains(msg, "connection refused"),
+		strings.Contains(msg, "no such host"),
+		strings.Contains(msg, "timeout"),
+		strings.Contains(msg, "deadline exceeded"),
+		strings.Contains(msg, "no series"):
+	default:
+		return err
+	}
+	if promURL != "" {
+		msg += fmt.Sprintf("\n\n→ run `ullage doctor --prometheus %s` to check the prerequisites.", promURL)
+	} else {
+		msg += "\n\n→ run `ullage doctor` to check the prerequisites."
+	}
+	return errors.New(msg)
+}
+
+// validateWindow rejects the windows that cannot mean anything, rather than
+// letting them reach Prometheus and come back as "the metrics endpoint returned
+// no series" -- which is also what a missing dcgm-exporter looks like, so the
+// user debugs the wrong thing.
+func validateWindow(f *flags) error {
+	if f.window < 0 {
+		return fmt.Errorf("--window must be positive (e.g. 14d, 336h)")
+	}
+	if f.idle < 0 {
+		return fmt.Errorf("--idle-threshold must be positive (e.g. 24h)")
+	}
+	if f.stuck < 0 {
+		return fmt.Errorf("--stuck-threshold must be positive (e.g. 1h)")
+	}
+	if f.step < 0 {
+		return fmt.Errorf("--step must be positive (e.g. 1h)")
+	}
+	if f.window > 0 && f.step > 0 && f.step > f.window {
+		return fmt.Errorf("--step (%s) is longer than --window (%s), which would sample the window fewer than once",
+			f.step, f.window)
+	}
+	if f.top < 0 {
+		return fmt.Errorf("--top must be zero or more")
+	}
+	return nil
 }
 
 func emit(res *api.Result, f *flags) error {
@@ -373,6 +448,10 @@ func cmdDemo(ctx context.Context, args []string) error {
 		o.APIServer = srv.Kube.URL
 		o.Prometheus.URL = srv.Prometheus.URL
 		o.Now = now
+		// Without this the header carries the demo server's ephemeral loopback
+		// port, so two runs of the same fixed fixture never produce the same
+		// output and `ullage demo | diff` always reports a change.
+		o.Context = "demo"
 	})
 }
 

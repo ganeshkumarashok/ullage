@@ -63,7 +63,7 @@ func (r *Resolver) Resolve(ctx context.Context, pod *kube.Pod) api.Provenance {
 	if ref == nil {
 		return api.Provenance{
 			Controlled: false,
-			Recognised: true,
+			Recognized: true,
 			RootKind:   "Pod",
 			RootName:   pod.Metadata.Name,
 		}
@@ -95,7 +95,7 @@ func (r *Resolver) Resolve(ctx context.Context, pod *kube.Pod) api.Provenance {
 	prov.RootKind = kind
 	prov.RootName = name
 	prov.APIVersion = apiVersion
-	prov.Recognised = recognisedKinds[kind]
+	prov.Recognized = recognisedKinds[kind]
 	return prov
 }
 

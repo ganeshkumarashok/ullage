@@ -123,7 +123,7 @@ func TestUnrecognisedOwnerGetsNoCommand(t *testing.T) {
 	if f == nil {
 		t.Fatal("missing finding")
 	}
-	if f.Provenance.Recognised {
+	if f.Provenance.Recognized {
 		t.Error("a kubeflow.org Notebook is not a kind ullage knows how to remove")
 	}
 	if f.Fix.Command != "" {

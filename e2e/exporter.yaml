@@ -46,7 +46,7 @@ spec:
           valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
         # gpu:util:power:pod:namespace
         - name: NODE0
-          value: "aks-nodepool1-21098950-vmss000000"
+          value: "__NODE0__"
         - name: SPEC
           value: "0:78:310:llama-train-0:ml,1:0:41:idle-notebook-0:ml"
         - name: SPEC_IDLE
