@@ -408,3 +408,62 @@ instance missed by hand.
 ### Next
 
 Push and let the release workflow build the tag.
+
+---
+
+## README and the hero visual
+
+### Goal
+
+Make the front page good enough that someone decides in ten seconds whether this
+is for them, and add an animated visual that carries the argument rather than
+decorating it.
+
+### Important findings
+
+The argument is not "GPUs are idle" — every dashboard says that. It is
+*allocated ≠ used, and unused ≠ wasted*. So the drawing has three nodes: one
+partly idle, one wholly idle, and one idle **on purpose**, shown and never
+counted as waste. The third node is the entire differentiator, and it now has a
+picture.
+
+No terminal-recording tool (`vhs`, `termtosvg`, `asciinema`) was installed, and
+installing one puts a machine-level dependency between a contributor and a
+rebuild. The hero is hand-authored SVG instead: no build step, diffable, and
+reproducible from the repository alone.
+
+One shared 18s CSS timeline drives every element, with percentage keyframes
+rather than `animation-delay`, so the acts cannot drift apart. Motion is
+opacity-only — the one property every renderer agrees on. Under
+`prefers-reduced-motion` the file holds its last frame, so turning motion off
+loses the animation and keeps the argument.
+
+The README had never shown what `ullage explain` prints, which is the entire
+payoff — the evidence, the owner, the one command, and the reason the obvious
+command is wrong. It does now.
+
+### Failed attempts
+
+Chrome's `--virtual-time-budget` does not drive the CSS animation clock
+predictably; every screenshot landed in the fade and the image looked blank.
+Freezing a frame with `animation-play-state: paused; animation-delay: -Ns`
+renders an exact moment deterministically, which is how the timeline was
+actually verified rather than assumed.
+
+The first draft of the hero used invented figures — $1,142 against
+`jupyter-alice`, five accelerators fallow, 1,680 hours. None of them were what
+the tool prints. Redrawn against real `ullage demo` and `ullage explain` output,
+and then pinned: `hero_test.go` fails if a figure in the picture stops appearing
+in a transcript, so the demo fixture cannot move without the drawing moving too.
+Both branches were proven by breaking them.
+
+### Files changed
+
+`docs/hero.svg` (new), `cmd/ullage/hero_test.go` (new), `README.md`
+(centred header, badges, hero, nav, `explain` transcript, examples table),
+`cmd/ullage/docs_test.go` (internal anchors resolve).
+
+### Next
+
+Push, and let the release workflow build the tag so the install commands and the
+CI badge stop being promises.

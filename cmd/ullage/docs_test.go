@@ -145,3 +145,46 @@ func atoi(t *testing.T, s string) int {
 	}
 	return n
 }
+
+// The front page now carries a nav bar, and section links are the first thing
+// to rot when a heading is reworded: nothing breaks loudly, the link just
+// stops going anywhere.
+var (
+	internalLink = regexp.MustCompile(`\]\(#([a-z0-9-]+)\)`)
+	heading      = regexp.MustCompile(`(?m)^#{2,4} (.+)$`)
+)
+
+func TestInternalLinksResolve(t *testing.T) {
+	for _, path := range []string{"../../README.md", "../../CONTRIBUTING.md", "../../examples/README.md"} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		doc := string(raw)
+
+		anchors := map[string]bool{}
+		for _, h := range heading.FindAllStringSubmatch(doc, -1) {
+			anchors[slug(h[1])] = true
+		}
+		for _, l := range internalLink.FindAllStringSubmatch(doc, -1) {
+			if !anchors[l[1]] {
+				t.Errorf("%s links to #%s, which no heading produces", path, l[1])
+			}
+		}
+	}
+}
+
+// slug reproduces the anchor GitHub derives from a heading: lowercased,
+// punctuation dropped, spaces hyphenated.
+func slug(h string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(h)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-':
+			b.WriteRune(r)
+		case r == ' ':
+			b.WriteRune('-')
+		}
+	}
+	return b.String()
+}

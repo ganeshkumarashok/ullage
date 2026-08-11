@@ -1,6 +1,21 @@
-# ullage
+<h1 align="center">ullage</h1>
 
-**The GPU your cluster paid for and didn't use.**
+<p align="center"><strong>The GPU your cluster paid for and didn't use.</strong></p>
+
+<p align="center">
+  <a href="https://github.com/ullage-project/ullage/actions/workflows/ci.yaml"><img alt="ci" src="https://github.com/ullage-project/ullage/actions/workflows/ci.yaml/badge.svg"></a>
+  <a href="LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/licence-Apache--2.0-blue"></a>
+  <img alt="Go 1.24+" src="https://img.shields.io/badge/go-1.24%2B-00ADD8">
+  <img alt="cluster access: read-only" src="https://img.shields.io/badge/cluster%20access-read--only-3fb950">
+  <img alt="status: alpha" src="https://img.shields.io/badge/status-alpha-d29922">
+</p>
+
+<p align="center">
+  <img src="docs/hero.svg" width="100%"
+       alt="Three nodes whose accelerators are all allocated. Eleven of the twelve did no GPU work for fourteen days, but four of those are held open deliberately by an autoscaler minimum, so they are shown and never counted as waste. Cluster-wide: 5.9k of 23k accelerator-hours fallow.">
+</p>
+
+<p align="center"><em>Allocated is not the same as used. Unused is not the same as wasted.<br>The gap between them is the thing this measures.</em></p>
 
 `ullage` measures the accelerator capacity a Kubernetes cluster is paying for
 and not using, attributes it to the workload and the person responsible, and
@@ -8,8 +23,19 @@ tells you the one command that will actually free it.
 
 It is a measurement, not a verdict. It never writes to your cluster.
 
-Try it right now, against a built-in fake cluster, with no Kubernetes and no
-Prometheus:
+**[Thirty seconds](#thirty-seconds)** ·
+[Why another tool](#why-another-tool) ·
+[How it compares](#how-it-compares) ·
+[What it will not do](#what-it-will-not-do) ·
+[Install](#install) ·
+[Use it for real](#use-it-for-real) ·
+[Checks](#checks) ·
+[Adding a check](#adding-a-check) ·
+[Suppressing](#suppressing)
+
+## Thirty seconds
+
+No Kubernetes, no Prometheus, no cloud account, no configuration:
 
 ```console
 $ git clone https://github.com/ullage-project/ullage && cd ullage
@@ -86,18 +112,96 @@ Every number above is computed, not canned. The fake cluster it reads is a
 real API server and a real Prometheus, both served from memory, so the demo
 exercises the same code a real scan does.
 
-For the two-minute version of the whole idea — including what the tool
-deliberately refuses to claim, and why that is the interesting part:
+### Then ask why
+
+A number nobody can act on is a number nobody reads. `ullage explain` opens one
+finding: the evidence behind the claim, what the claim deliberately stops short
+of saying, who owns the workload, the one command that frees the capacity, and
+what that command will cost whoever is using it.
 
 ```console
-$ make tour
+$ ullage explain research/jupyter-alice --demo
 ```
 
-Then there are runnable [examples](examples/): a
-[CI gate](examples/ci-gate.sh) that fails a build on waste above a budget, and a
-[weekly digest](examples/weekly-digest.sh) that turns a scan into a report
-grouped by owner. Both default to the demo cluster, so you can see exactly what
-they do before pointing them at anything real.
+<details>
+<summary>the whole thing, verbatim — 3 accelerators, an owner, one command, and the reason the obvious command is wrong</summary>
+
+```
+  research/jupyter-alice
+  idle-pod · research/jupyter-alice: 3 accelerators held with no work for 14d
+
+  Evidence
+    Window           14d ending 11 Aug 2026 07:00 UTC
+    Fallow for       14d
+    Last GPU work    none within the window
+    Peak utilization 0% across the whole window
+    Power draw       56 W mean (14% of 400 W TDP)
+    Sample coverage  100% of expected samples present
+
+    Utilization      ▁▁▁▁▁▁▁▁▁▁▁▁▁▁  all zero
+                 14d ago    now
+
+  What this means
+    Every utilization sample for these accelerators read exactly zero for the
+    last 14d. ullage does not claim the workload is unimportant, and it does not
+    estimate how efficiently it ran — GPU utilization is a poor measure of
+    that. It claims only what the metric can prove: no CUDA kernel was resident
+    on these devices at any sampled moment in that time. Power draw
+    independently agrees: the devices are drawing near-idle wattage.
+
+  Accelerators
+    Held             3 × NVIDIA-A100-SXM4-80GB (exclusive)
+    Fallow           1.0k accelerator-hours
+    Cost             ~$3,427 over the window
+                 built-in list prices (approximate; override with --pricing) rate for NVIDIA-A100-SXM4-80GB; ullage never blends rates across models
+
+  Managed by
+    Root owner       StatefulSet/jupyter-alice
+
+  Owner
+    Owner            alice@example.com
+    Resolved via     pod-annotation
+               ullage.dev/owner=alice@example.com
+
+  What to do
+    Deleting the pods will not free the devices — StatefulSet jupyter-alice
+    recreates them.
+
+    kubectl scale statefulset -n research jupyter-alice --replicas=0
+
+    Confirm with alice@example.com before running this.
+
+  Before you do
+    These pods are Running, not Completed. State held only in the container
+    filesystem will be lost. ullage measures idleness, not intent, and cannot
+    distinguish an abandoned session from capacity held warm on purpose.
+
+  Stop it happening again
+    Interactive GPU sessions are the most common source of this finding. A TTL
+    controller, an activity-based idle culler, or a scheduled scale-to-zero for
+    notebook workloads removes the class of problem rather than this instance of
+    it.
+
+  Suppress: ullage ignore idle-pod/research/jupyter-alice --reason "..." --until 2026-11-11
+  Docs:     https://ullage.dev/checks/idle-pod
+```
+
+</details>
+
+Note what it targets. Three idle pods owned by a StatefulSet do not go away
+with `kubectl delete pod`; the controller recreates them and nothing is freed.
+`ullage` walks the ownership chain to the root and suggests scaling the
+StatefulSet instead. Where the root is a CRD it does not recognise, it names
+the resource and prints **no command at all**.
+
+Three more things worth running before you decide whether to trust it. All use
+the same demo cluster, and none of them touch anything real:
+
+| run this | and you see |
+|---|---|
+| `make tour` | the two-minute version of the whole idea, including what the tool deliberately refuses to claim — which is the interesting part |
+| [`examples/ci-gate.sh`](examples/ci-gate.sh) | a build failing when waste goes over a budget, and why a scan that broke must not exit like a scan that found nothing |
+| [`examples/weekly-digest.sh`](examples/weekly-digest.sh) | one scan turned into a Markdown report grouped by owner, with `jq` |
 
 ## Why another tool
 
