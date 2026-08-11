@@ -1,0 +1,429 @@
+package scan
+
+import (
+	"context"
+	"fmt"
+	"sort"
+	"time"
+
+	"github.com/ullage-project/ullage/internal/check"
+	"github.com/ullage-project/ullage/internal/humanize"
+	"github.com/ullage-project/ullage/internal/inventory"
+	"github.com/ullage-project/ullage/pkg/ullage/api"
+)
+
+// Options controls a scan.
+type Options struct {
+	Window         time.Duration
+	IdleThreshold  time.Duration
+	StuckThreshold time.Duration
+	InitGrace      time.Duration
+	Step           time.Duration
+	MinConfidence  string
+	Namespaces     []string
+	Checks         []string
+	Pricing        *api.Pricing
+	Now            time.Time
+	Trace          bool
+	Version        string
+	Progress       func(string)
+}
+
+// Defaults fills in the documented default values.
+func (o *Options) Defaults() {
+	if o.Window == 0 {
+		o.Window = 14 * 24 * time.Hour
+	}
+	if o.IdleThreshold == 0 {
+		o.IdleThreshold = 24 * time.Hour
+	}
+	if o.StuckThreshold == 0 {
+		o.StuckThreshold = time.Hour
+	}
+	if o.InitGrace == 0 {
+		// Pulling a multi-gigabyte image or downloading forty gigabytes of
+		// weights in an init container routinely takes more than an hour while
+		// legitimately holding the device.
+		o.InitGrace = 6 * time.Hour
+	}
+	if o.Step == 0 {
+		// One sample per hour over a fortnight is 336 points per device: enough
+		// to show shape, cheap enough not to melt a shared query frontend.
+		o.Step = time.Hour
+	}
+	if o.MinConfidence == "" {
+		o.MinConfidence = api.EvidenceMedium
+	}
+	if o.Now.IsZero() {
+		o.Now = time.Now().UTC()
+	}
+	if o.Progress == nil {
+		o.Progress = func(string) {}
+	}
+}
+
+// Analyse runs the checks over a cluster fact view and enriches what they find.
+//
+// Checks detect; this function decides. Ownership, provenance, the fix command,
+// grouping, ranking and pricing all happen here, once, so that every check gets
+// them identically and a new check inherits the whole pipeline for free.
+func Analyse(ctx context.Context, cl *inventory.Cluster, inv *inventory.Inventory, opts Options) (*api.Result, error) {
+	opts.Defaults()
+
+	res := &api.Result{
+		APIVersion: api.Version,
+		Scan: api.ScanMeta{
+			Tool:    api.Tool{Name: "ullage", Version: opts.Version},
+			Context: cl.Context,
+			Started: cl.Now,
+			Window:  api.ISODuration(cl.Window),
+			Params: api.Params{
+				IdleThreshold:  api.ISODuration(opts.IdleThreshold),
+				StuckThreshold: api.ISODuration(opts.StuckThreshold),
+				MinConfidence:  opts.MinConfidence,
+				Step:           api.ISODuration(opts.Step),
+				Checks:         opts.Checks,
+			},
+			AcceleratorsObserved: inv.Observed,
+			AcceleratorsAnalyzed: inv.Analyzed,
+			AllocationModels:     inv.Counts,
+			GPUHoursPaid:         float64(inv.Observed) * cl.Window.Hours(),
+			ProfilingMetrics:     cl.ProfilingMetrics,
+		},
+		Recommendations: []api.Finding{},
+		Suppressed:      []api.Finding{},
+		NotAnalyzed:     inv.Exclusions,
+		Warnings:        []string{},
+		Pricing:         opts.Pricing,
+	}
+	if res.NotAnalyzed == nil {
+		res.NotAnalyzed = []api.Exclusion{}
+	}
+
+	checks, err := check.Selected(opts.Checks)
+	if err != nil {
+		return nil, err
+	}
+	params := check.Params{
+		IdleThreshold:  opts.IdleThreshold,
+		StuckThreshold: opts.StuckThreshold,
+		InitGrace:      opts.InitGrace,
+	}
+
+	var raw []check.RawFinding
+	for _, c := range checks {
+		opts.Progress("Running check " + c.Describe().ID)
+		found, err := c.Run(ctx, cl, params)
+		if err != nil {
+			// One failing check must not lose the others' findings. A partial
+			// result that says so is more useful than no result.
+			res.Warnings = append(res.Warnings,
+				fmt.Sprintf("check %s failed and was skipped: %v", c.Describe().ID, err))
+			continue
+		}
+		raw = append(raw, found...)
+	}
+
+	var ranked, byDesign []api.Finding
+	below := 0
+	for _, rf := range raw {
+		if !opts.inScope(rf.Subject.Namespace) {
+			continue
+		}
+		f := enrich(cl, rf, opts)
+		switch {
+		case f.ByDesign:
+			byDesign = append(byDesign, f)
+		case !meetsConfidence(f.EvidenceConfidence, opts.MinConfidence):
+			below++
+		default:
+			ranked = append(ranked, f)
+		}
+	}
+
+	sortFindings(ranked)
+	sortFindings(byDesign)
+
+	total := 0.0
+	for i := range ranked {
+		ranked[i].Rank = i + 1
+		total += ranked[i].Impact.GPUHoursFallow
+	}
+	for i := range byDesign {
+		byDesign[i].Rank = i + 1
+	}
+
+	res.Recommendations = ranked
+	res.ByDesign = byDesign
+	res.BelowThreshold = below
+	res.Scan.GPUHoursFallow = total
+	res.UnmetDemand = unmetDemand(cl)
+	return res, nil
+}
+
+// enrich turns a raw detection into a recommendation.
+func enrich(cl *inventory.Cluster, rf check.RawFinding, opts Options) api.Finding {
+	desc := descriptorFor(rf.Check)
+
+	f := api.Finding{
+		ID:                 check.FindingID(rf.Check, rf.Subject),
+		Check:              rf.Check,
+		EvidenceConfidence: rf.Confidence,
+		Summary:            subjectRef(rf.Subject) + ": " + rf.Summary,
+		Evidence:           rf.Evidence,
+		Risk:               desc.Risk,
+		Docs:               desc.Docs,
+		ByDesign:           rf.ByDesign,
+		Because:            rf.Because,
+	}
+
+	switch rf.Subject.Kind {
+	case "node-pool":
+		f.Workload = api.Workload{
+			Kind: "NodePool", Name: rf.Subject.Name,
+			Grouped: len(rf.Subject.Nodes), Members: rf.Subject.Nodes,
+		}
+		f.Owner = api.Owner{
+			Identity: "platform", ResolvedVia: "node-pool",
+			Detail: "node pools are owned by whoever runs the cluster",
+		}
+		f.OwnershipConfidence = api.OwnerResolved
+		f.Provenance = api.Provenance{
+			Controlled: true, RootKind: "NodePool",
+			RootName: rf.Subject.Pool, Recognised: true,
+		}
+		f.Accelerators = acceleratorsForNodes(cl, rf.Subject.Nodes)
+		f.Fix = poolFix(cl, rf, desc)
+
+	default:
+		pod := firstPod(cl, rf.Subject.Pods)
+		names := make([]string, 0, len(rf.Subject.Pods))
+		for _, r := range rf.Subject.Pods {
+			names = append(names, r.Name)
+		}
+		f.Workload = api.Workload{
+			Namespace: rf.Subject.Namespace,
+			Kind:      workloadKind(pod),
+			Name:      rf.Subject.Name,
+			Grouped:   len(names),
+			Members:   names,
+		}
+		f.Owner = pod.Owner
+		f.OwnershipConfidence = OwnershipConfidence(pod.Owner)
+		f.Provenance = pod.Provenance
+		f.Accelerators = acceleratorsForPods(cl, rf.Subject.Pods, rf.Devices)
+		f.Fix = SynthesiseFix(pod.Provenance, rf.Subject.Namespace, names, pod.Owner, desc.Prevention)
+		if rf.Check == api.CheckStuckPod {
+			f.Fix = stuckFix(pod, rf, desc)
+		}
+	}
+
+	f.Fix.Blockers = rf.Blockers
+	if rf.ByDesign {
+		f.Fix = api.Fix{
+			Targets: api.FixTargetNone,
+			Rationale: "No action recommended. Review the reservation if the workload it was held " +
+				"for has already shipped.",
+		}
+	}
+
+	// Fallow hours are device-hours, so a finding covering four devices for a
+	// day is four times one covering one. This is the only ranking signal, and
+	// it is the one a reader can verify by hand.
+	f.Impact.GPUHoursFallow = float64(f.TotalAccelerators()) * rf.Fallow.Hours()
+	priceFinding(&f, opts.Pricing)
+	return f
+}
+
+// priceFinding attaches money only where a real rate exists for a single model.
+//
+// A rate blended across mixed models — T4 and H100 differ by roughly tenfold —
+// is a fabricated number wearing a decimal point, and a fabricated dollar figure
+// that a FinOps team can disprove destroys credibility across every other
+// number in the output.
+func priceFinding(f *api.Finding, p *api.Pricing) {
+	if p == nil || len(f.Accelerators) != 1 {
+		return
+	}
+	rate, ok := p.Rate(f.Accelerators[0].Model)
+	if !ok {
+		return
+	}
+	cost := f.Impact.GPUHoursFallow * rate
+	f.Impact.WindowCost = &cost
+	f.Impact.Currency = p.Currency
+	f.Impact.PricingSource = p.Source
+	f.Impact.PricingScope = "single-sku"
+}
+
+func descriptorFor(id string) check.Descriptor {
+	if c, ok := check.Lookup(id); ok {
+		return c.Describe()
+	}
+	return check.Descriptor{ID: id}
+}
+
+func acceleratorsForPods(cl *inventory.Cluster, pods []inventory.PodRef, deviceIDs []string) []api.Accelerator {
+	byModel := map[string]*api.Accelerator{}
+	counted := 0
+	for _, ref := range pods {
+		for _, d := range cl.DevicesOf(ref) {
+			a, ok := byModel[d.Model]
+			if !ok {
+				a = &api.Accelerator{Model: d.Model, Vendor: d.Vendor, Allocation: d.Allocation, TDPWatts: d.TDPWatts}
+				byModel[d.Model] = a
+			}
+			a.Count++
+			counted++
+		}
+	}
+	// A stuck pod often has no metrics at all — a container that never started
+	// never produced any — so fall back to what the pod requested rather than
+	// reporting zero devices for the most clear-cut findings the tool has.
+	if counted == 0 {
+		requested, model, vendor, alloc, tdp := 0, "unknown", "unknown", api.AllocExclusive, 0.0
+		for _, ref := range pods {
+			for _, p := range cl.Pods {
+				if p.Ref == ref {
+					requested += p.Accelerators
+					if n := cl.NodeByName(p.Node); n != nil {
+						model, vendor, alloc, tdp = n.Model, n.Vendor, n.Allocation, n.TDPWatts
+					}
+				}
+			}
+		}
+		if requested == 0 {
+			return nil
+		}
+		return []api.Accelerator{{Model: model, Vendor: vendor, Count: requested, Allocation: alloc, TDPWatts: tdp}}
+	}
+	return flatten(byModel)
+}
+
+func acceleratorsForNodes(cl *inventory.Cluster, nodes []string) []api.Accelerator {
+	byModel := map[string]*api.Accelerator{}
+	for _, name := range nodes {
+		n := cl.NodeByName(name)
+		if n == nil {
+			continue
+		}
+		a, ok := byModel[n.Model]
+		if !ok {
+			a = &api.Accelerator{Model: n.Model, Vendor: n.Vendor, Allocation: n.Allocation, TDPWatts: n.TDPWatts}
+			byModel[n.Model] = a
+		}
+		a.Count += n.Accelerators
+	}
+	return flatten(byModel)
+}
+
+func flatten(m map[string]*api.Accelerator) []api.Accelerator {
+	out := make([]api.Accelerator, 0, len(m))
+	for _, a := range m {
+		out = append(out, *a)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Model < out[j].Model })
+	return out
+}
+
+func firstPod(cl *inventory.Cluster, refs []inventory.PodRef) inventory.PodView {
+	for _, ref := range refs {
+		for _, p := range cl.Pods {
+			if p.Ref == ref {
+				return p
+			}
+		}
+	}
+	if len(refs) > 0 {
+		return inventory.PodView{Ref: refs[0]}
+	}
+	return inventory.PodView{}
+}
+
+func workloadKind(p inventory.PodView) string {
+	if p.Provenance.Controlled && p.Provenance.RootKind != "" {
+		return p.Provenance.RootKind
+	}
+	return "Pod"
+}
+
+func (o *Options) inScope(ns string) bool {
+	if len(o.Namespaces) == 0 || ns == "" {
+		return true
+	}
+	for _, n := range o.Namespaces {
+		if n == ns {
+			return true
+		}
+	}
+	return false
+}
+
+var confidenceRank = map[string]int{
+	api.EvidenceLow:    0,
+	api.EvidenceMedium: 1,
+	api.EvidenceHigh:   2,
+}
+
+func meetsConfidence(have, min string) bool {
+	return confidenceRank[have] >= confidenceRank[min]
+}
+
+// sortFindings ranks strictly by fallow accelerator-hours, descending.
+//
+// Deliberately not a composite score involving confidence or ease of fix: a
+// reader must be able to look at the list and understand instantly why row one
+// is above row two. Confidence filters before ranking; it never acts as a
+// multiplier within it. Ties break deterministically so output is stable
+// between runs on an unchanged cluster.
+func sortFindings(f []api.Finding) {
+	sort.SliceStable(f, func(i, j int) bool {
+		if f[i].Impact.GPUHoursFallow != f[j].Impact.GPUHoursFallow {
+			return f[i].Impact.GPUHoursFallow > f[j].Impact.GPUHoursFallow
+		}
+		if f[i].Evidence.FallowDuration != f[j].Evidence.FallowDuration {
+			return f[i].Evidence.FallowDuration > f[j].Evidence.FallowDuration
+		}
+		return f[i].ID < f[j].ID
+	})
+}
+
+// unmetDemand counts Pending pods that want accelerators.
+//
+// This is context, never a finding. A Pending pod has not been scheduled and
+// holds no device — it is the victim of the waste, frequently blocked by
+// exactly the workloads the checks found. Reporting recoverable hours against
+// it would be arithmetically zero and conceptually backwards. Printing it
+// beside the idle capacity is the most persuasive thing in the output, because
+// it shows both halves of the same problem.
+func unmetDemand(cl *inventory.Cluster) *api.UnmetDemand {
+	count, gpus, unschedulable := 0, 0, 0
+	for _, p := range cl.Pods {
+		if !p.Pending || p.Accelerators == 0 {
+			continue
+		}
+		count++
+		gpus += p.Accelerators
+		if p.Unschedulable {
+			unschedulable++
+		}
+	}
+	if count == 0 {
+		return nil
+	}
+	detail := "waiting for accelerators that are not available"
+	if unschedulable > 0 {
+		detail = fmt.Sprintf("%d reported Unschedulable by the scheduler", unschedulable)
+	}
+	return &api.UnmetDemand{Pods: count, Accelerators: gpus, Detail: detail}
+}
+
+// Ref renders a subject the way a person types it.
+func subjectRef(s check.Subject) string {
+	if s.Namespace == "" {
+		return s.Name
+	}
+	return s.Namespace + "/" + s.Name
+}
+
+var _ = humanize.Duration
