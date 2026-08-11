@@ -65,9 +65,34 @@ func (g *Gatherer) Gather(ctx context.Context, opts Options) (*inventory.Cluster
 		nsByName[namespaces[i].Name] = &namespaces[i]
 	}
 
-	claims, _ := g.Kube.ResourceClaims(ctx)
+	// A DRA pod holds no extended resource, so the *only* record that it is
+	// sitting on four H100s is its ResourceClaim. Swallowing this error, which
+	// is what a bare `_` did, made an occupied node read as an empty one and
+	// attached "delete this pool" to hardware at capacity. RBAC that has not
+	// been updated for resource.k8s.io is the ordinary way to get here.
+	//
+	// A cluster with no DRA at all is not an error: ResourceClaims returns
+	// nil, nil when the API group is absent.
+	claims, claimsErr := g.Kube.ResourceClaims(ctx)
 	draByPod := draDevicesByPod(claims)
 	draByNode := draDevicesByNode(claims, pods)
+
+	// Which nodes are we now unable to speak about? Only those hosting a pod
+	// that declares a claim: the pod spec is readable even when the claim is
+	// not, so the blast radius is exactly known rather than assumed to be the
+	// whole cluster. Nodes with no DRA pods on them are still fully analysable.
+	draOpaqueNodes := map[string]bool{}
+	if claimsErr != nil {
+		for i := range pods {
+			if pods[i].UsesDRA() && pods[i].Spec.NodeName != "" {
+				draOpaqueNodes[pods[i].Spec.NodeName] = true
+			}
+		}
+		warnings = append(warnings, fmt.Sprintf(
+			"ResourceClaims are not readable (%v), so devices held through DRA are invisible; "+
+				"%d node(s) running DRA pods are excluded rather than reported as empty",
+			claimsErr, len(draOpaqueNodes)))
+	}
 
 	opts.Progress("Classifying accelerator allocation")
 	inv := inventory.Build(nodes, draByNode)
@@ -164,6 +189,7 @@ func (g *Gatherer) Gather(ctx context.Context, opts Options) (*inventory.Cluster
 			Unschedulable:     ni.Node.Spec.Unschedulable,
 			Age:               end.Sub(ni.Node.Metadata.CreationTimestamp),
 			Initialising:      ni.Initialising,
+			OccupancyUnknown:  draOpaqueNodes[name],
 			ScaleDownDisabled: strings.EqualFold(ni.Node.Metadata.Annotations["cluster-autoscaler.kubernetes.io/scale-down-disabled"], "true"),
 		})
 	}

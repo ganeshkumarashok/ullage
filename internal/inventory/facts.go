@@ -259,6 +259,13 @@ type NodeView struct {
 	Age           time.Duration
 	Initialising  bool
 
+	// OccupancyUnknown marks a node whose accelerator occupancy could not be
+	// determined — today, a node running DRA pods whose ResourceClaims were
+	// unreadable. It is deliberately distinct from "empty": a check that
+	// cannot tell the difference will eventually recommend deleting a full
+	// node, and that is the one mistake this tool cannot make and survive.
+	OccupancyUnknown bool
+
 	// ScaleDownDisabled records the explicit annotation. An operator who has
 	// pinned a node is making a decision, not a mistake.
 	ScaleDownDisabled bool

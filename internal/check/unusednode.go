@@ -200,6 +200,10 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 		switch {
 		case !node.Ready, node.Unschedulable, node.Initialising, node.ScaleDownDisabled:
 			continue
+		case node.OccupancyUnknown:
+			// Not "this node is empty" — "we could not find out". The two are
+			// indistinguishable from here and only one of them is safe to act on.
+			continue
 		case node.Age < p.IdleThreshold:
 			continue
 		}

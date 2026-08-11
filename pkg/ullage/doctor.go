@@ -108,7 +108,8 @@ func Doctor(ctx context.Context, opts Options, observers ...func(DoctorCheck)) (
 	case gpuNodes == 0:
 		add(DoctorCheck{Name: "accelerator nodes", Status: "warn",
 			Detail: fmt.Sprintf("no node advertises nvidia.com/gpu across %d nodes", len(nodes)),
-			Remedy: "if this cluster uses DRA, that is expected — ullage reads ResourceSlices too"})
+			Remedy: "if this cluster uses DRA, that is expected — devices are held through " +
+				"ResourceClaims rather than advertised as nvidia.com/gpu"})
 	default:
 		add(DoctorCheck{Name: "accelerator nodes", Status: "ok",
 			Detail: fmt.Sprintf("%d nodes, %d devices, %s", gpuNodes, devices, summarise(models))})
@@ -119,6 +120,20 @@ func Doctor(ctx context.Context, opts Options, observers ...func(DoctorCheck)) (
 			Remedy: "grant get/list on pods in all namespaces"})
 	} else {
 		add(DoctorCheck{Name: "list pods", Status: "ok"})
+	}
+
+	// DRA is the one read whose failure is dangerous rather than merely
+	// limiting: a pod holding four H100s through a ResourceClaim requests no
+	// extended resource, so an unreadable claim makes a full node look empty.
+	// ullage refuses to analyse those nodes, which is safe but silently costs
+	// coverage, and an operator has no way to know unless it is said here.
+	if _, err := kc.ResourceClaims(ctx); err != nil {
+		add(DoctorCheck{Name: "list resourceclaims", Status: "warn", Detail: err.Error(),
+			Remedy: "grant get/list on resourceclaims in resource.k8s.io; until then, nodes " +
+				"running DRA pods are excluded rather than reported, because an unreadable " +
+				"claim is indistinguishable from an empty node"})
+	} else {
+		add(DoctorCheck{Name: "list resourceclaims", Status: "ok"})
 	}
 
 	if _, err := kc.PodDisruptionBudgets(ctx); err != nil {
