@@ -88,7 +88,17 @@ func poolFix(cl *inventory.Cluster, rf check.RawFinding, desc check.Descriptor) 
 	// a similarly named node group *does* exist the command silently acts on
 	// the wrong thing. Karpenter also has no minimum size to lower, so the only
 	// honest suggestion is to look at what is stopping consolidation.
-	if cl.Autoscaler.Reclaims() {
+	// Decided per node, then falling back to autoscaler discovery. A node that
+	// says it is Karpenter's is Karpenter's, regardless of what else is
+	// installed or what the scan was permitted to read.
+	karpenter := cl.Autoscaler.Reclaims()
+	for _, name := range rf.Subject.Nodes {
+		if n := cl.NodeByName(name); n != nil && n.Karpenter() {
+			karpenter = true
+			break
+		}
+	}
+	if karpenter {
 		fix.Rationale = "Karpenter manages this pool and has no minimum size, so there is no floor " +
 			"to lower — it should have consolidated these nodes already. Something is preventing " +
 			"that: a disruption budget, a do-not-disrupt annotation, or a pod Karpenter will not " +

@@ -26,8 +26,14 @@ type Cluster struct {
 	Now   time.Time
 	nodes []node
 	pods  []pod
-	// series maps "host/gpu" to the utilization shape over the window.
-	series map[string]*seriesSpec
+	// series holds the utilization shapes over the window.
+	//
+	// A slice rather than a map keyed by "host/gpu", because one physical GPU
+	// produces several series when it is handed to a second pod during the
+	// window — which is what normal job churn looks like at 14d. A map keyed by
+	// device made that unrepresentable, so the fixture stayed green on a bug
+	// that fires on any real cluster with turnover.
+	series []*seriesSpec
 	floors map[string]int
 }
 

@@ -147,7 +147,9 @@ func (g *Gatherer) Gather(ctx context.Context, opts Options) (*inventory.Cluster
 		cl.Pods = append(cl.Pods, g.podView(ctx, resolver, &pods[i], nsByName, pdbs, draByPod, end))
 	}
 	for name, ni := range inv.Nodes {
+		kpool, _ := kube.NodePoolOf(ni.Node)
 		cl.Nodes = append(cl.Nodes, inventory.NodeView{
+			KarpenterPool:     kpool,
 			Name:              name,
 			Pool:              ni.Pool,
 			Provider:          ni.Provider,
@@ -174,12 +176,20 @@ func (g *Gatherer) Gather(ctx context.Context, opts Options) (*inventory.Cluster
 
 	// Attribution is counted after the join, not assumed from the census: a
 	// device whose metrics exist but carry no pod is not an analysed device.
-	analyzed := 0
+	// Counted over distinct device IDs, not over records. cl.Devices holds one
+	// record per metric series, and a GPU handed to a second pod during the
+	// window produces a second series for the same physical card. Counting
+	// records would report more accelerators analysed than the cluster has —
+	// "analysed 80 of 68 observed" — which discredits the one number the whole
+	// tool rests on. Per-series records are kept deliberately, because
+	// per-pod attribution needs them; only the census collapses them.
+	seen := map[string]bool{}
 	for _, d := range cl.Devices {
 		if d.Analyzable {
-			analyzed++
+			seen[d.ID] = true
 		}
 	}
+	analyzed := len(seen)
 	inv.Analyzed = analyzed
 
 	// Every device the census saw but the metrics did not must be named. The
@@ -272,9 +282,14 @@ func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *
 	for _, s := range avgPower {
 		powerBy[deviceKey(s.Labels)] = s.Value
 	}
+	// Summed, not assigned: dcgm-exporter labels utilization with the pod that
+	// held the device, so a GPU reused by three pods over a fortnight returns
+	// three series. Last-write-wins would report the coverage of whichever one
+	// happened to sort last, understating completeness for exactly the busy
+	// devices whose coverage matters most.
 	samplesBy := map[string]float64{}
 	for _, s := range samples {
-		samplesBy[deviceKey(s.Labels)] = s.Value
+		samplesBy[deviceKey(s.Labels)] += s.Value
 	}
 
 	// Expected sample count, used to tell a scrape gap from a genuine zero. An
@@ -342,6 +357,15 @@ func refine(st *inventory.Stats, s promql.Series, start, end time.Time, step tim
 	st.LastNonZero = sum.LastNonZero
 	if sum.FallowSince.After(st.FallowSince) {
 		st.FallowSince = sum.FallowSince
+	}
+	// A series that never read non-zero has no FallowSince of its own, so it
+	// would otherwise claim to have been idle since the window opened — even if
+	// its first sample landed yesterday because the node joined then. A device
+	// cannot give evidence about time before it was being watched.
+	if sum.LastNonZero == nil && len(s.Samples) > 0 {
+		if first := s.Samples[0].T; first.After(st.FallowSince) {
+			st.FallowSince = first
+		}
 	}
 	// The coarse series is a downsample, so it can only ever contradict a zero
 	// by finding work the aggregate missed — never the other way round.

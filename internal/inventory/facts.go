@@ -189,7 +189,21 @@ type NodeView struct {
 	// ScaleDownDisabled records the explicit annotation. An operator who has
 	// pinned a node is making a decision, not a mistake.
 	ScaleDownDisabled bool
+
+	// KarpenterPool is set when the node carries karpenter.sh/nodepool.
+	//
+	// Read from the node rather than inferred from which autoscaler was
+	// discovered, because the two disagree in the common cases. A cluster can
+	// run cluster-autoscaler for its system pool and Karpenter for its GPU
+	// pool, and RBAC can deny karpenter.sh reads while the nodes themselves
+	// stay perfectly readable. In both, autoscaler-level detection says "not
+	// Karpenter" and the tool emits `eksctl scale nodegroup` for a node group
+	// that does not exist — or, worse, for a similarly named ASG that does.
+	KarpenterPool string
 }
+
+// Karpenter reports whether this node is managed by Karpenter.
+func (n NodeView) Karpenter() bool { return n.KarpenterPool != "" }
 
 // AutoscalerView exposes the one thing only the autoscaler knows: whether an
 // operator deliberately decided this capacity should stay.

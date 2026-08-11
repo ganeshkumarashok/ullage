@@ -15,7 +15,7 @@ import (
 func Build(now time.Time) *Cluster {
 	c := &Cluster{
 		Now:    now,
-		series: map[string]*seriesSpec{},
+		series: []*seriesSpec{},
 		floors: map[string]int{"h100-reserve": 2},
 	}
 	ago := func(d time.Duration) time.Time { return now.Add(-d) }
@@ -100,6 +100,19 @@ func Build(now time.Time) *Cluster {
 		labels: map[string]string{"owner": "training-team"},
 		owner:  &ownerRef{kind: "Job", name: "llama-pretrain", apiVersion: "batch/v1"},
 	})
+
+	// Job churn: an earlier job held GPU 0 of this node and finished. Its
+	// samples keep the pod label they were scraped with, so this one physical
+	// device returns two series over the window.
+	//
+	// Present because it is what every real cluster looks like at fourteen
+	// days, and because a fixture that emits exactly one series per device
+	// makes the census look correct while it double-counts. Any code that
+	// treats a metric series as a physical accelerator breaks here.
+	churn := c.addSeries("h100-train-0", "0", "NVIDIA-H100-SXM5-80GB", 700,
+		"training", "llama-pretrain-prev-0", busy(90))
+	churn.gapFrom = ago(9 * 24 * time.Hour)
+	churn.gapTo = ago(0)
 
 	// ---- Scenario 5: low average, but not idle — must NOT be flagged -------
 	// Mean utilization around 4%. A tool thresholding on "average util < 5%"
@@ -246,8 +259,7 @@ func (c *Cluster) fillUnallocated() {
 			continue // MIG instances are not one series per physical device
 		}
 		for i := 0; i < physical; i++ {
-			key := n.name + "/" + gpuIndex(i)
-			if _, ok := c.series[key]; ok {
+			if c.hasSeries(n.name, gpuIndex(i)) {
 				continue
 			}
 			tdp := 400.0
@@ -371,19 +383,29 @@ func (c *Cluster) addSeries(host, gpu, model string, tdp float64, ns, podName st
 		host: host, gpu: gpu, model: model, powerW: tdp,
 		ns: ns, pod: podName, pattern: pattern,
 	}
-	c.series[host+"/"+gpu] = s
+	c.series = append(c.series, s)
 	return s
 }
 
+func (c *Cluster) hasSeries(host, gpu string) bool {
+	for _, s := range c.series {
+		if s.host == host && s.gpu == gpu {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Cluster) sortedSeries() []*seriesSpec {
-	keys := make([]string, 0, len(c.series))
-	for k := range c.series {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	out := make([]*seriesSpec, 0, len(keys))
-	for _, k := range keys {
-		out = append(out, c.series[k])
-	}
+	out := append([]*seriesSpec(nil), c.series...)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].host != out[j].host {
+			return out[i].host < out[j].host
+		}
+		if out[i].gpu != out[j].gpu {
+			return out[i].gpu < out[j].gpu
+		}
+		return out[i].pod < out[j].pod
+	})
 	return out
 }

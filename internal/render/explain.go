@@ -158,12 +158,15 @@ func Explain(w io.Writer, f *api.Finding, res *api.Result, o Options) error {
 func meaning(f *api.Finding) string {
 	switch f.Check {
 	case api.CheckIdlePod:
+		// "the whole period above" would name the window, and the window is not
+		// what was zero — the trailing fallow run is. The Evidence block
+		// directly above prints both, and one of them is often a non-zero peak.
 		s := fmt.Sprintf(
-			"Every utilization sample for these accelerators read exactly zero for the whole "+
-				"period above. ullage does not claim the workload is unimportant, and it does not "+
-				"estimate how efficiently it ran — GPU utilization is a poor measure of that. It "+
-				"claims only what the metric can prove: no CUDA kernel was resident on these "+
-				"devices at any sampled moment across %s.",
+			"Every utilization sample for these accelerators read exactly zero for the last %s. "+
+				"ullage does not claim the workload is unimportant, and it does not estimate how "+
+				"efficiently it ran — GPU utilization is a poor measure of that. It claims only "+
+				"what the metric can prove: no CUDA kernel was resident on these devices at any "+
+				"sampled moment in that time.",
 			Human(f.Evidence.FallowDuration.Duration()))
 		if f.Evidence.PowerDrawTDPRatio > 0 && f.Evidence.PowerDrawTDPRatio < 0.20 {
 			s += " Power draw independently agrees: the devices are drawing near-idle wattage."
@@ -178,11 +181,11 @@ func meaning(f *api.Finding) string {
 		if f.ByDesign {
 			return f.Because
 		}
-		return "These nodes advertise accelerators and are Ready and schedulable, but no pod " +
-			"holding an accelerator — by extended resource, MIG profile, time-sliced replica or " +
-			"DRA claim — has been placed on them, and no accelerator on them has reported any " +
-			"work. They are not being drained, they are not cordoned, and they are past the " +
-			"initialisation grace period."
+		return fmt.Sprintf("These nodes advertise accelerators and are Ready and schedulable, but no "+
+			"pod holding an accelerator — by extended resource, MIG profile, time-sliced replica or "+
+			"DRA claim — has been placed on them, and no accelerator on them has reported work in "+
+			"the last %s. They are not being drained, they are not cordoned, and they are past the "+
+			"initialisation grace period.", Human(f.Evidence.FallowDuration.Duration()))
 	}
 	return f.Summary
 }

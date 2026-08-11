@@ -183,8 +183,18 @@ func TestDRADevicesAreAnalysedNotExcluded(t *testing.T) {
 // The census must reconcile. A headline percentage over a denominator the
 // reader cannot account for turns a monitoring gap into a claim about
 // efficiency.
+// The demo cluster deliberately contains a GPU that was handed to a second pod
+// during the window, so it returns two utilization series for one physical
+// device. Counting series as accelerators produces "analysed 61 of 68" against
+// 8 excluded — a total of 69 — and the honest denominator is the single claim
+// the whole tool rests on.
 func TestAcceleratorAccountingReconciles(t *testing.T) {
 	res := scan(t)
+	if res.Scan.AcceleratorsAnalyzed > res.Scan.AcceleratorsObserved {
+		t.Fatalf("analysed %d of %d observed: more accelerators were analysed than exist, "+
+			"which means metric series are being counted as hardware",
+			res.Scan.AcceleratorsAnalyzed, res.Scan.AcceleratorsObserved)
+	}
 	excluded := 0
 	for _, e := range res.NotAnalyzed {
 		excluded += e.Accelerators

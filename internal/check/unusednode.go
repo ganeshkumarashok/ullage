@@ -63,23 +63,45 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 	// models nobody has taught the tool about yet — which is the failure mode
 	// that keeps recurring, because the allocation model is the part of this
 	// domain that changes fastest.
-	lastWork := map[string]time.Duration{} // node -> time since work was last seen
+	// lastWork holds, per node, the shortest time since any accelerator on it
+	// was seen doing work. Shortest, because one busy device is enough to make
+	// the whole node occupied — taking anything but the minimum would let a
+	// node with three idle GPUs and one working one read as idle.
+	lastWork := map[string]time.Duration{}
 	for _, d := range cl.Devices {
 		if d.Util.Samples == 0 {
 			continue
 		}
-		if d.Util.Max <= 0 {
-			if _, seen := lastWork[d.Node]; !seen {
-				lastWork[d.Node] = cl.Window
+
+		var since time.Duration
+		if d.Util.Max > 0 {
+			// The device did work at some point. How long ago is the trailing
+			// zero run; if it is still working, that is zero.
+			if idle, ok := d.Util.FallowFor(cl.Now); ok {
+				since = idle
 			}
-			continue
-		}
-		since := cl.Window
-		if idle, ok := d.Util.FallowFor(cl.Now); ok {
-			since = idle
 		} else {
-			since = 0
+			// The device read zero throughout, but a zero reading is only
+			// evidence in proportion to how much of the window was observed.
+			// One sample out of a fortnight is not a fortnight of measured
+			// idleness, and without this gate it became one: the node was
+			// credited with the full window and the evidence called the number
+			// "measured", which is the overstatement this check was rewritten
+			// to remove.
+			//
+			// Skipping is deliberately not the same as dropping the node. It
+			// falls through to the node-age path, which makes a weaker claim
+			// and labels itself as such.
+			if d.Util.Completeness < minCompleteness {
+				continue
+			}
+			idle, ok := d.Util.FallowFor(cl.Now)
+			if !ok {
+				continue
+			}
+			since = idle
 		}
+
 		if cur, seen := lastWork[d.Node]; !seen || since < cur {
 			lastWork[d.Node] = since
 		}

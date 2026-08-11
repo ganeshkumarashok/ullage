@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ullage-project/ullage/internal/check"
+	"github.com/ullage-project/ullage/internal/config"
 	"github.com/ullage-project/ullage/internal/humanize"
 	"github.com/ullage-project/ullage/internal/inventory"
 	"github.com/ullage-project/ullage/pkg/ullage/api"
@@ -23,6 +24,7 @@ type Options struct {
 	Namespaces     []string
 	Checks         []string
 	Pricing        *api.Pricing
+	Suppressions   *config.Suppressions
 	Now            time.Time
 	Trace          bool
 	Version        string
@@ -124,13 +126,25 @@ func Analyse(ctx context.Context, cl *inventory.Cluster, inv *inventory.Inventor
 		raw = append(raw, found...)
 	}
 
-	var ranked, byDesign []api.Finding
+	var ranked, byDesign, suppressed []api.Finding
 	below := 0
 	for _, rf := range raw {
 		if !opts.inScope(rf.Subject.Namespace) {
 			continue
 		}
 		f := enrich(cl, rf, opts)
+
+		// Checked before confidence and before by-design, so that a matching
+		// entry is recorded as used even when the finding would not have been
+		// shown anyway. Otherwise suppressing a finding would make the tool
+		// report the suppression as dead the moment it started working.
+		if reason, ok := opts.Suppressions.Match(f.ID); ok {
+			f.Suppressed = true
+			f.SuppressedReason = reason
+			suppressed = append(suppressed, f)
+			continue
+		}
+
 		switch {
 		case f.ByDesign:
 			byDesign = append(byDesign, f)
@@ -143,6 +157,8 @@ func Analyse(ctx context.Context, cl *inventory.Cluster, inv *inventory.Inventor
 
 	sortFindings(ranked)
 	sortFindings(byDesign)
+	sortFindings(suppressed)
+	res.Warnings = append(res.Warnings, opts.Suppressions.Warnings()...)
 
 	total := 0.0
 	for i := range ranked {
@@ -152,9 +168,13 @@ func Analyse(ctx context.Context, cl *inventory.Cluster, inv *inventory.Inventor
 	for i := range byDesign {
 		byDesign[i].Rank = i + 1
 	}
+	for i := range suppressed {
+		suppressed[i].Rank = i + 1
+	}
 
 	res.Recommendations = ranked
 	res.ByDesign = byDesign
+	res.Suppressed = suppressed
 	res.BelowThreshold = below
 	res.Scan.GPUHoursFallow = total
 	res.UnmetDemand = unmetDemand(cl)

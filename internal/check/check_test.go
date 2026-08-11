@@ -547,6 +547,79 @@ func TestUnusedNodeNeverRecommendsDeletingBusyHardware(t *testing.T) {
 	})
 }
 
+// Under-observed capacity is the failure mode that survived the first fix for
+// this: the node-age overstatement was removed, and then reappeared as a
+// "measured" duration derived from almost no samples at all.
+func TestUnusedNodeDoesNotCallOneSampleAMeasurement(t *testing.T) {
+	t.Run("a barely-sampled zero does not become a measured fortnight", func(t *testing.T) {
+		// One zero sample out of a fortnight. The device is not evidence of
+		// anything; treating it as a full window of observed idleness turns a
+		// monitoring gap into a scale-to-zero recommendation.
+		sparse := inventory.Stats{
+			Samples:        1,
+			Completeness:   1.0 / 40320.0,
+			ZeroThroughout: true,
+			FallowSince:    now.Add(-window),
+		}
+		nodes := []inventory.NodeView{
+			{Name: "gpu-0", Pool: "gpu", Accelerators: 4, Ready: true, Age: 30 * 24 * time.Hour},
+		}
+		devices := []inventory.Device{device("gpu-0/0", "gpu-0", "gpu", nil, sparse)}
+		cl := cluster(devices, nil, nodes)
+		cl.Autoscaler = &inventory.AutoscalerView{Floors: map[string]int{}}
+
+		got := find(t, check.UnusedNode{}, cl)
+		if len(got) != 1 {
+			t.Fatalf("got %d findings, want 1", len(got))
+		}
+		for _, n := range got[0].Evidence.Notes {
+			if strings.Contains(n, "measured on these accelerators") {
+				t.Fatal("a single sample was reported as a measured trailing run of zero " +
+					"utilization; sample coverage is what makes a zero mean anything, and " +
+					"without it this is the node's age wearing a measurement's label")
+			}
+		}
+	})
+
+	t.Run("a well-sampled zero is still measured", func(t *testing.T) {
+		// The gate must not swallow the real case it is protecting.
+		nodes := []inventory.NodeView{
+			{Name: "gpu-0", Pool: "gpu", Accelerators: 4, Ready: true, Age: 30 * 24 * time.Hour},
+		}
+		devices := []inventory.Device{
+			device("gpu-0/0", "gpu-0", "gpu", nil, idleStats(5*24*time.Hour, true)),
+		}
+		cl := cluster(devices, nil, nodes)
+		cl.Autoscaler = &inventory.AutoscalerView{Floors: map[string]int{}}
+
+		got := find(t, check.UnusedNode{}, cl)
+		if len(got) != 1 || got[0].Fallow != 5*24*time.Hour {
+			t.Fatalf("well-sampled node lost its measured duration: %+v", got)
+		}
+	})
+
+	t.Run("one busy device keeps the whole node off the list", func(t *testing.T) {
+		// Three idle accelerators and one working one is a node in use. The
+		// per-node answer has to be the minimum across its devices; any other
+		// combination lets a busy node be recommended for deletion.
+		nodes := []inventory.NodeView{
+			{Name: "gpu-0", Pool: "gpu", Accelerators: 4, Ready: true, Age: 30 * 24 * time.Hour},
+		}
+		devices := []inventory.Device{
+			device("gpu-0/0", "gpu-0", "gpu", nil, idleStats(10*24*time.Hour, true)),
+			device("gpu-0/1", "gpu-0", "gpu", nil, idleStats(10*24*time.Hour, true)),
+			device("gpu-0/2", "gpu-0", "gpu", nil, idleStats(10*24*time.Hour, true)),
+			device("gpu-0/3", "gpu-0", "gpu", nil, idleStats(time.Minute, true)),
+		}
+		cl := cluster(devices, nil, nodes)
+		cl.Autoscaler = &inventory.AutoscalerView{Floors: map[string]int{}}
+
+		if got := find(t, check.UnusedNode{}, cl); len(got) != 0 {
+			t.Fatalf("got %d findings for a node with an accelerator working a minute ago", len(got))
+		}
+	})
+}
+
 // One Kubernetes pool is routinely several autoscaler node groups — AKS makes
 // one VMSS per zone, EKS one ASG per zone — and GPU capacity is zone
 // constrained, so this is the normal shape rather than an edge case.
