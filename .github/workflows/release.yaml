@@ -146,7 +146,7 @@ jobs:
       # linux/arm64 is here because ullage runs on the control plane, not on the
       # GPU nodes. The GPUs are amd64; the cluster running this CronJob may not
       # be (Graviton on EKS, Ampere on AKS).
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           push: true
