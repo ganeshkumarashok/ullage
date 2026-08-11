@@ -5,9 +5,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ullage-project/ullage/internal/check"
-	"github.com/ullage-project/ullage/internal/inventory"
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/internal/check"
+	"github.com/ganeshkumarashok/ullage/internal/inventory"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 // Provider renders the cloud-specific part of a remediation.

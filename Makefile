@@ -12,7 +12,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo v0.0
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 BIN     := bin/ullage
-IMAGE   ?= ghcr.io/ullage-project/ullage:$(VERSION)
+IMAGE   ?= ghcr.io/ganeshkumarashok/ullage:$(VERSION)
 
 ##@ Getting started
 

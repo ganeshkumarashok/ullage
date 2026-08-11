@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ullage-project/ullage/internal/demo"
-	"github.com/ullage-project/ullage/pkg/ullage"
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/internal/demo"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 // End-to-end coverage over the demo cluster, served as real HTTP by real

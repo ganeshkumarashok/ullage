@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ullage-project/ullage/internal/humanize"
+	"github.com/ganeshkumarashok/ullage/internal/humanize"
 )
 
 // DurationFlag is what actually sits behind --window on the command line, so

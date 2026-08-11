@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ullage-project/ullage/internal/kube"
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/internal/kube"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 // ownerAPI serves a pod owned by a ReplicaSet which is in turn owned by a

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ullage-project/ullage/pkg/ullage"
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 // gpulessCluster is a Kubernetes API that answers every list with an empty

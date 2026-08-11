@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ullage-project/ullage/internal/config"
+	"github.com/ganeshkumarashok/ullage/internal/config"
 )
 
 var now = time.Date(2026, 8, 11, 4, 0, 0, 0, time.UTC)

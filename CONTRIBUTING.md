@@ -25,7 +25,7 @@ Concretely, that means:
 ## Getting set up
 
 ```sh
-git clone https://github.com/ullage-project/ullage
+git clone https://github.com/ganeshkumarashok/ullage
 cd ullage
 make demo      # runs against a built-in fake cluster, no Kubernetes needed
 ```

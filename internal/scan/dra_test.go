@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ullage-project/ullage/internal/check"
-	"github.com/ullage-project/ullage/internal/kube"
-	"github.com/ullage-project/ullage/internal/promql"
+	"github.com/ganeshkumarashok/ullage/internal/check"
+	"github.com/ganeshkumarashok/ullage/internal/kube"
+	"github.com/ganeshkumarashok/ullage/internal/promql"
 )
 
 // fakeAPI serves a tiny cluster: one GPU node, one pod on it that holds its

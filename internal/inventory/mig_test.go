@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ullage-project/ullage/internal/kube"
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/internal/kube"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 // node builds a GPU node with the given labels and allocatable resources.

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 // sparkline exists to answer "did anything at all happen here", and each

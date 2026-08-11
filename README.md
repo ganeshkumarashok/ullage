@@ -3,7 +3,7 @@
 <p align="center"><strong>The GPU your cluster paid for and didn't use.</strong></p>
 
 <p align="center">
-  <a href="https://github.com/ullage-project/ullage/actions/workflows/ci.yaml"><img alt="ci" src="https://github.com/ullage-project/ullage/actions/workflows/ci.yaml/badge.svg"></a>
+  <a href="https://github.com/ganeshkumarashok/ullage/actions/workflows/ci.yaml"><img alt="ci" src="https://github.com/ganeshkumarashok/ullage/actions/workflows/ci.yaml/badge.svg"></a>
   <a href="LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/licence-Apache--2.0-blue"></a>
   <img alt="Go 1.24+" src="https://img.shields.io/badge/go-1.24%2B-00ADD8">
   <img alt="cluster access: read-only" src="https://img.shields.io/badge/cluster%20access-read--only-3fb950">
@@ -39,7 +39,7 @@ It is a measurement, not a verdict. It never writes to your cluster.
 No Kubernetes, no Prometheus, no cloud account, no configuration:
 
 ```console
-$ git clone https://github.com/ullage-project/ullage && cd ullage
+$ git clone https://github.com/ganeshkumarashok/ullage && cd ullage
 $ make demo
 ```
 
@@ -189,7 +189,7 @@ $ ./bin/ullage explain research/jupyter-alice --demo
     it.
 
   Suppress: ullage ignore idle-pod/research/jupyter-alice --reason "..." --until 2026-11-11
-  Docs:     https://github.com/ullage-project/ullage/blob/main/docs/checks/idle-pod.md
+  Docs:     https://github.com/ganeshkumarashok/ullage/blob/main/docs/checks/idle-pod.md
 ```
 
 </details>
@@ -297,7 +297,7 @@ a few seconds and the test suite runs without a cluster.
 From source — works today, needs Go 1.24+:
 
 ```console
-git clone https://github.com/ullage-project/ullage && cd ullage
+git clone https://github.com/ganeshkumarashok/ullage && cd ullage
 make install          # go install into $GOBIN (use `make build` for ./bin/ullage)
 ```
 
@@ -306,15 +306,15 @@ supplied CronJob additionally runs it with a read-only root filesystem and every
 capability dropped:
 
 ```console
-make image     # tags ghcr.io/ullage-project/ullage:$(git describe --tags)
-docker run --rm ghcr.io/ullage-project/ullage:v0.1.0 demo
+make image     # tags ghcr.io/ganeshkumarashok/ullage:$(git describe --tags)
+docker run --rm ghcr.io/ganeshkumarashok/ullage:v0.1.0 demo
 ```
 
 Once `v0.1.0` is tagged, these will also work, and this note will go away:
 
 ```console
-go install github.com/ullage-project/ullage/cmd/ullage@latest
-docker run --rm ghcr.io/ullage-project/ullage:v0.1.0 demo
+go install github.com/ganeshkumarashok/ullage/cmd/ullage@latest
+docker run --rm ghcr.io/ganeshkumarashok/ullage:v0.1.0 demo
 kubectl krew install ullage && kubectl ullage demo
 ```
 

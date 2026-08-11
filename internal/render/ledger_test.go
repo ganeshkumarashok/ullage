@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 // ledgerResult builds a result whose numbers are chosen so the arithmetic can

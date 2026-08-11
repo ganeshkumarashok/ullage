@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please report security issues privately via
-[GitHub Security Advisories](https://github.com/ullage-project/ullage/security/advisories/new).
+[GitHub Security Advisories](https://github.com/ganeshkumarashok/ullage/security/advisories/new).
 If that link does not work — private reporting has to be enabled on the
 repository, and this project is young — email the maintainer listed in
 [MAINTAINERS.md](MAINTAINERS.md) at the address on their GitHub profile rather

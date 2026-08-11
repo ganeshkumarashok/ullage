@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ullage-project/ullage/internal/humanize"
-	"github.com/ullage-project/ullage/internal/kube"
-	"github.com/ullage-project/ullage/internal/promql"
+	"github.com/ganeshkumarashok/ullage/internal/humanize"
+	"github.com/ganeshkumarashok/ullage/internal/kube"
+	"github.com/ganeshkumarashok/ullage/internal/promql"
 )
 
 // DoctorCheck is one prerequisite and its verdict.

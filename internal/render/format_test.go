@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 func TestHumanRendersDaysHoursMinutesInDecreasingGranularity(t *testing.T) {

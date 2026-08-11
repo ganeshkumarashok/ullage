@@ -11,11 +11,11 @@ import (
 	"context"
 	"time"
 
-	"github.com/ullage-project/ullage/internal/config"
-	"github.com/ullage-project/ullage/internal/kube"
-	"github.com/ullage-project/ullage/internal/promql"
-	"github.com/ullage-project/ullage/internal/scan"
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/internal/config"
+	"github.com/ganeshkumarashok/ullage/internal/kube"
+	"github.com/ganeshkumarashok/ullage/internal/promql"
+	"github.com/ganeshkumarashok/ullage/internal/scan"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 // Options configures a scan.

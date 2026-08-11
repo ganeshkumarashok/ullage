@@ -6,9 +6,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ullage-project/ullage/internal/humanize"
-	"github.com/ullage-project/ullage/internal/inventory"
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/internal/humanize"
+	"github.com/ganeshkumarashok/ullage/internal/inventory"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 func init() { Register(StuckPod{}) }

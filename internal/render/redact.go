@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 // A redactor rewrites every identifier a scan collected out of the document.

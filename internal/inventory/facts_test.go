@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ullage-project/ullage/internal/inventory"
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/internal/inventory"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 var now = time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)

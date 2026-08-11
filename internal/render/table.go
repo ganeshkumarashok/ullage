@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 // Table renders the default scan output.

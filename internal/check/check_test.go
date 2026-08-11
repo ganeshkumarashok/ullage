@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ullage-project/ullage/internal/check"
-	"github.com/ullage-project/ullage/internal/inventory"
-	"github.com/ullage-project/ullage/internal/scan"
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/internal/check"
+	"github.com/ganeshkumarashok/ullage/internal/inventory"
+	"github.com/ganeshkumarashok/ullage/internal/scan"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 // These tests build clusters from literals. That is the point of the fact

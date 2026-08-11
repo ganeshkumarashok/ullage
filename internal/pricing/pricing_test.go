@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ullage-project/ullage/internal/pricing"
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/internal/pricing"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 // Load("") is what every scan uses unless a user passes --pricing, so the

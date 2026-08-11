@@ -1,4 +1,4 @@
-module github.com/ullage-project/ullage
+module github.com/ganeshkumarashok/ullage
 
 go 1.24
 

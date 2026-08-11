@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 	"gopkg.in/yaml.v3"
 )
 

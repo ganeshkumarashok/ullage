@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 // Duration formatting lives in the renderer, not in the contract package.

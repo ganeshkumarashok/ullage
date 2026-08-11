@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ullage-project/ullage/internal/humanize"
+	"github.com/ganeshkumarashok/ullage/internal/humanize"
 )
 
 func TestDurationRendersDaysHoursMinutesInDecreasingGranularity(t *testing.T) {

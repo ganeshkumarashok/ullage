@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ullage-project/ullage/internal/inventory"
-	"github.com/ullage-project/ullage/internal/promql"
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/internal/inventory"
+	"github.com/ganeshkumarashok/ullage/internal/promql"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 var (

@@ -3,7 +3,7 @@ package scan
 import (
 	"testing"
 
-	"github.com/ullage-project/ullage/internal/kube"
+	"github.com/ganeshkumarashok/ullage/internal/kube"
 )
 
 // claim builds an allocated ResourceClaim reserved for the given pod UIDs.

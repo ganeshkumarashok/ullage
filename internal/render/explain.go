@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 // Explain renders the full evidence screen for one finding.

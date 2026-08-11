@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ullage-project/ullage/internal/check"
-	"github.com/ullage-project/ullage/internal/inventory"
-	"github.com/ullage-project/ullage/internal/kube"
-	"github.com/ullage-project/ullage/internal/promql"
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/internal/check"
+	"github.com/ganeshkumarashok/ullage/internal/inventory"
+	"github.com/ganeshkumarashok/ullage/internal/kube"
+	"github.com/ganeshkumarashok/ullage/internal/promql"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 // Metric names. DCGM_FI_DEV_GPU_UTIL is asked only the one question it can

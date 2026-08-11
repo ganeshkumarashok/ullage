@@ -15,14 +15,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ullage-project/ullage/internal/check"
-	"github.com/ullage-project/ullage/internal/config"
-	"github.com/ullage-project/ullage/internal/demo"
-	"github.com/ullage-project/ullage/internal/humanize"
-	"github.com/ullage-project/ullage/internal/pricing"
-	"github.com/ullage-project/ullage/internal/render"
-	"github.com/ullage-project/ullage/pkg/ullage"
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/internal/check"
+	"github.com/ganeshkumarashok/ullage/internal/config"
+	"github.com/ganeshkumarashok/ullage/internal/demo"
+	"github.com/ganeshkumarashok/ullage/internal/humanize"
+	"github.com/ganeshkumarashok/ullage/internal/pricing"
+	"github.com/ganeshkumarashok/ullage/internal/render"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 // Version is set at build time. The default is deliberately not "dev": a

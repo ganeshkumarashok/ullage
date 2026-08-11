@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 // Suspending a CronJob stops the next run. It does not touch the Job already

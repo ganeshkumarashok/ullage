@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ullage-project/ullage/internal/kube"
+	"github.com/ganeshkumarashok/ullage/internal/kube"
 )
 
 // Paid hours used to be "accelerators now x the whole window", which bills a

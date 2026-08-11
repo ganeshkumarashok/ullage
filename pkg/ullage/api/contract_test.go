@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 // The contract is the product for anyone who does not use the terminal — a

@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ullage-project/ullage/internal/check"
-	"github.com/ullage-project/ullage/internal/inventory"
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/internal/check"
+	"github.com/ganeshkumarashok/ullage/internal/inventory"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 // A pod bound to a node and wedged on ImagePullBackOff is phase Pending. The

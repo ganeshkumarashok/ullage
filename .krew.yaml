@@ -16,7 +16,7 @@ metadata:
   name: ullage
 spec:
   version: {{ .TagName }}
-  homepage: https://github.com/ullage-project/ullage
+  homepage: https://github.com/ganeshkumarashok/ullage
   shortDescription: Find the GPU your cluster paid for and didn't use.
   description: |
     ullage reports accelerators a cluster is paying for and not using, and
@@ -42,27 +42,27 @@ spec:
         matchLabels:
           os: darwin
           arch: amd64
-      uri: https://github.com/ullage-project/ullage/releases/download/{{ .TagName }}/ullage_{{ .TagName }}_darwin_amd64.tar.gz
+      uri: https://github.com/ganeshkumarashok/ullage/releases/download/{{ .TagName }}/ullage_{{ .TagName }}_darwin_amd64.tar.gz
       sha256: "{{ .Sha256Darwin_amd64 }}"
       bin: ullage
     - selector:
         matchLabels:
           os: darwin
           arch: arm64
-      uri: https://github.com/ullage-project/ullage/releases/download/{{ .TagName }}/ullage_{{ .TagName }}_darwin_arm64.tar.gz
+      uri: https://github.com/ganeshkumarashok/ullage/releases/download/{{ .TagName }}/ullage_{{ .TagName }}_darwin_arm64.tar.gz
       sha256: "{{ .Sha256Darwin_arm64 }}"
       bin: ullage
     - selector:
         matchLabels:
           os: linux
           arch: amd64
-      uri: https://github.com/ullage-project/ullage/releases/download/{{ .TagName }}/ullage_{{ .TagName }}_linux_amd64.tar.gz
+      uri: https://github.com/ganeshkumarashok/ullage/releases/download/{{ .TagName }}/ullage_{{ .TagName }}_linux_amd64.tar.gz
       sha256: "{{ .Sha256Linux_amd64 }}"
       bin: ullage
     - selector:
         matchLabels:
           os: linux
           arch: arm64
-      uri: https://github.com/ullage-project/ullage/releases/download/{{ .TagName }}/ullage_{{ .TagName }}_linux_arm64.tar.gz
+      uri: https://github.com/ganeshkumarashok/ullage/releases/download/{{ .TagName }}/ullage_{{ .TagName }}_linux_arm64.tar.gz
       sha256: "{{ .Sha256Linux_arm64 }}"
       bin: ullage

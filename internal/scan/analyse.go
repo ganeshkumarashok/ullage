@@ -6,11 +6,11 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ullage-project/ullage/internal/check"
-	"github.com/ullage-project/ullage/internal/config"
-	"github.com/ullage-project/ullage/internal/humanize"
-	"github.com/ullage-project/ullage/internal/inventory"
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/internal/check"
+	"github.com/ganeshkumarashok/ullage/internal/config"
+	"github.com/ganeshkumarashok/ullage/internal/humanize"
+	"github.com/ganeshkumarashok/ullage/internal/inventory"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 // Options controls a scan.

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ullage-project/ullage/internal/kube"
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/internal/kube"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 // Device inventory and allocation-model detection.

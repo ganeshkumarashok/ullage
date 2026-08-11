@@ -155,5 +155,5 @@ jobs:
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
           tags: |
-            ghcr.io/ullage-project/ullage:${{ github.ref_name }}
-            ghcr.io/ullage-project/ullage:latest
+            ghcr.io/ganeshkumarashok/ullage:${{ github.ref_name }}
+            ghcr.io/ganeshkumarashok/ullage:latest

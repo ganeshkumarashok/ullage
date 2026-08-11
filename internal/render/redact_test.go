@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 // TestRedactRemovesEveryIdentifier is the assertion the feature actually owes

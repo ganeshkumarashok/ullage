@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ullage-project/ullage/internal/check"
-	"github.com/ullage-project/ullage/internal/inventory"
-	"github.com/ullage-project/ullage/internal/scan"
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/internal/check"
+	"github.com/ganeshkumarashok/ullage/internal/inventory"
+	"github.com/ganeshkumarashok/ullage/internal/scan"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 // controlledPod is a pod owned by a controller, which is what makes the

@@ -6,9 +6,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ullage-project/ullage/internal/humanize"
-	"github.com/ullage-project/ullage/internal/inventory"
-	"github.com/ullage-project/ullage/pkg/ullage/api"
+	"github.com/ganeshkumarashok/ullage/internal/humanize"
+	"github.com/ganeshkumarashok/ullage/internal/inventory"
+	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
 func init() { Register(IdlePod{}) }
@@ -351,7 +351,7 @@ func podByRef(cl *inventory.Cluster, ref inventory.PodRef) inventory.PodView {
 // docsURLFor is the only way this is built. TestEveryCheckHasADocsPage walks
 // the registry and asserts each one names a file that exists on disk, so a new
 // check cannot ship pointing at a page nobody wrote.
-const docsBase = "https://github.com/ullage-project/ullage/blob/main/docs/checks/"
+const docsBase = "https://github.com/ganeshkumarashok/ullage/blob/main/docs/checks/"
 
 // docsURLFor returns the published documentation URL for a check name.
 func docsURLFor(check string) string { return docsBase + check + ".md" }
