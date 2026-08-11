@@ -41,7 +41,7 @@ func (IdlePod) Describe() Descriptor {
 		Prevention: "Interactive GPU sessions are the most common source. A TTL controller, an " +
 			"activity-based idle culler, or a scheduled scale-to-zero for notebook workloads " +
 			"removes the class of problem rather than this instance of it.",
-		Docs: docsBase + api.CheckIdlePod,
+		Docs: docsURLFor(api.CheckIdlePod),
 	}
 }
 
@@ -302,6 +302,15 @@ func podByRef(cl *inventory.Cluster, ref inventory.PodRef) inventory.PodView {
 	return inventory.PodView{Ref: ref}
 }
 
-const docsBase = "https://ullage.dev/checks/"
+// docsBase points at the check pages in the repository rather than a project
+// domain. Every finding prints this URL, so it has to resolve for a reader who
+// has done nothing but install the binary; a documentation link that 404s is
+// worse than no link, because it is read as the whole tool being abandoned.
+//
+// docsURLFor is the only way this is built. TestEveryCheckHasADocsPage walks
+// the registry and asserts each one names a file that exists on disk, so a new
+// check cannot ship pointing at a page nobody wrote.
+const docsBase = "https://github.com/ullage-project/ullage/blob/main/docs/checks/"
 
-var _ = context.Background
+// docsURLFor returns the published documentation URL for a check name.
+func docsURLFor(check string) string { return docsBase + check + ".md" }

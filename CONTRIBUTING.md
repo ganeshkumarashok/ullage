@@ -47,12 +47,29 @@ make e2e-kind  # a real Kubernetes cluster with fake GPUs (needs kind + docker)
 shipped past the unit suite so far was caught by a real cluster and not by a
 fixture — see `e2e/README.md` for what it does and does not fake.
 
+## Documentation is tested
+
+The transcript on the front page is not pasted, it is asserted. `make check`
+re-runs the exact command the README shows and diffs the output, so changing
+the explain renderer fails the build until the README is regenerated:
+
+```sh
+ULLAGE_DEMO_NOW=2026-08-11T07:00:00Z go run ./cmd/ullage explain research/jupyter-alice --demo
+```
+
+`ULLAGE_DEMO_NOW` pins the demo cluster's clock. Without it the demo floats
+with wall-clock time, which is right for a human and useless for a document.
+
+Every check also needs a page in `docs/checks/`, because every finding prints a
+link to one. The build asserts that the page exists, that it has the sections a
+reader needs before acting — including **when this finding is wrong** — and
+that no page documents a check that no longer exists.
+
 ## Writing a check
 
 A check is one file. Implement three methods, register it in an `init`, and the
 whole pipeline — ownership resolution, provenance, grouping, ranking, pricing,
 suppression, rendering, JSON — applies to your findings for free.
-
 ```go
 func init() { check.Register(myCheck{}) }
 

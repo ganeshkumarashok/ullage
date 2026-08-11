@@ -183,7 +183,7 @@ $ ullage explain research/jupyter-alice --demo
     it.
 
   Suppress: ullage ignore idle-pod/research/jupyter-alice --reason "..." --until 2026-11-11
-  Docs:     https://ullage.dev/checks/idle-pod
+  Docs:     https://github.com/ullage-project/ullage/blob/main/docs/checks/idle-pod.md
 ```
 
 </details>
@@ -398,11 +398,13 @@ clusters, and never in a demo.
 
 | ID | Finds |
 |---|---|
-| `idle-pod` | Pods holding accelerators that have read exactly zero for longer than the threshold |
-| `stuck-pod` | Pods holding accelerators whose containers are not running (crash loops, image pull failures, wedged init) |
-| `unused-node` | Accelerator nodes nothing has been scheduled on — and what is stopping the autoscaler from reclaiming them |
+| [`idle-pod`](docs/checks/idle-pod.md) | Pods holding accelerators that have read exactly zero for longer than the threshold |
+| [`stuck-pod`](docs/checks/stuck-pod.md) | Pods holding accelerators whose containers are not running (crash loops, image pull failures, wedged init) |
+| [`unused-node`](docs/checks/unused-node.md) | Accelerator nodes nothing has been scheduled on — and what is stopping the autoscaler from reclaiming them |
 
-`ullage checks` prints each one's claim and its risk.
+`ullage checks` prints each one's claim and its risk. Every finding links to its
+[check page](docs/checks/), which spells out how the check is measured and —
+the section worth reading before you act on a batch — when it is wrong.
 
 ## Adding a check
 

@@ -33,7 +33,7 @@ func (StuckPod) Describe() Descriptor {
 			"The logs are the starting point, not a deletion.",
 		Prevention: "Set a backoffLimit on Jobs and an appropriate restartPolicy, so a failing " +
 			"workload eventually stops holding its device instead of crash-looping indefinitely.",
-		Docs: docsBase + api.CheckStuckPod,
+		Docs: docsURLFor(api.CheckStuckPod),
 	}
 }
 

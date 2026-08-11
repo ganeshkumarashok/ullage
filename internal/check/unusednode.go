@@ -36,7 +36,7 @@ func (UnusedNode) Describe() Descriptor {
 			"not reserved for a launch, a failover, or a periodic job before scaling it down.",
 		Prevention: "Confirm the autoscaler's minimum size for this pool matches the floor you " +
 			"actually want, and that scale-down is not blocked by pods with no eviction toleration.",
-		Docs: docsBase + api.CheckUnusedNode,
+		Docs: docsURLFor(api.CheckUnusedNode),
 	}
 }
 

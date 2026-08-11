@@ -454,6 +454,31 @@ func emit(res *api.Result, f *flags) error {
 // This exists because the first question anyone asks about a tool like this is
 // what its output looks like, and the honest answer should not require them to
 // have a GPU cluster, a Prometheus and a set of credentials first.
+// demoNow is the instant the demo cluster is anchored to.
+//
+// It floats with the wall clock so the demo reads as a live cluster rather than
+// a museum piece. That makes its output change every hour, which is fine for a
+// human and useless for a document: a transcript pasted into the README is
+// stale within the hour, and there is no way to prove the README still matches
+// the tool.
+//
+// ULLAGE_DEMO_NOW pins it. The docs test uses it to re-run the exact command
+// printed in the README and diff the result, so the transcript is verified
+// rather than trusted. It is deliberately an environment variable and not a
+// flag: pinning time is a documentation-tooling concern, not a user-facing
+// feature, and a --now flag would invite people to fake scan windows.
+func demoNow() (time.Time, error) {
+	raw, ok := os.LookupEnv("ULLAGE_DEMO_NOW")
+	if !ok {
+		return time.Now().UTC().Truncate(time.Hour), nil
+	}
+	t, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("ULLAGE_DEMO_NOW=%q is not an RFC3339 instant: %w", raw, err)
+	}
+	return t.UTC(), nil
+}
+
 func cmdDemo(ctx context.Context, args []string) error {
 	var serve bool
 	rest := make([]string, 0, len(args))
@@ -465,7 +490,10 @@ func cmdDemo(ctx context.Context, args []string) error {
 		rest = append(rest, a)
 	}
 
-	now := time.Now().UTC().Truncate(time.Hour)
+	now, err := demoNow()
+	if err != nil {
+		return err
+	}
 	srv := demo.Start(now)
 	defer srv.Close()
 
@@ -513,7 +541,10 @@ func cmdExplain(ctx context.Context, args []string) error {
 
 	var srv *demo.Servers
 	if isDemo {
-		now := time.Now().UTC().Truncate(time.Hour)
+		now, err := demoNow()
+		if err != nil {
+			return err
+		}
 		srv = demo.Start(now)
 		defer srv.Close()
 		opts.APIServer = srv.Kube.URL
