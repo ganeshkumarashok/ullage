@@ -3,6 +3,7 @@ package scan
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -429,7 +430,7 @@ func TestChunkedCombinesPeaksAcrossSubWindows(t *testing.T) {
 	}}
 	g := gatherer(t, p)
 
-	got, err := g.chunked(context.Background(), "m", "max_over_time", sched, base, end, maxCombine)
+	got, _, err := g.chunked(context.Background(), "m", "max_over_time", sched, base, end, maxCombine)
 	if err != nil {
 		t.Fatalf("chunked: %v", err)
 	}
@@ -451,7 +452,7 @@ func TestChunkedSumsWhereSummingIsTheAggregate(t *testing.T) {
 	}}
 	g := gatherer(t, p)
 
-	got, err := g.chunked(context.Background(), "m", "count_over_time", sched, base, end, sumCombine)
+	got, _, err := g.chunked(context.Background(), "m", "count_over_time", sched, base, end, sumCombine)
 	if err != nil {
 		t.Fatalf("chunked: %v", err)
 	}
@@ -472,7 +473,7 @@ func TestChunkedSurvivesAMissingOlderBlock(t *testing.T) {
 	}
 	g := gatherer(t, p)
 
-	got, err := g.chunked(context.Background(), "m", "max_over_time", sched, base, end, maxCombine)
+	got, _, err := g.chunked(context.Background(), "m", "max_over_time", sched, base, end, maxCombine)
 	if err != nil {
 		t.Fatalf("chunked failed entirely because one sub-window was unavailable: %v. "+
 			"Short retention is normal and must shorten the evidence, not abort the scan", err)
@@ -493,7 +494,7 @@ func TestChunkedRefusesWhenEverySubWindowFails(t *testing.T) {
 	}}
 	g := gatherer(t, p)
 
-	if got, err := g.chunked(context.Background(), "m", "max_over_time", sched, base, end, maxCombine); err == nil {
+	if got, _, err := g.chunked(context.Background(), "m", "max_over_time", sched, base, end, maxCombine); err == nil {
 		t.Fatalf("chunked returned %v and no error with every sub-window failing; an empty "+
 			"result reads as a cluster of perfectly idle GPUs", got)
 	}
@@ -511,7 +512,7 @@ func TestChunkedKeepsTwoHoldersOfOneDeviceApart(t *testing.T) {
 	}}
 	g := gatherer(t, p)
 
-	got, err := g.chunked(context.Background(), "m", "count_over_time", sched, base, end, sumCombine)
+	got, _, err := g.chunked(context.Background(), "m", "count_over_time", sched, base, end, sumCombine)
 	if err != nil {
 		t.Fatalf("chunked: %v", err)
 	}
@@ -534,12 +535,97 @@ func TestChunkedKeepsIdenticalPodNamesInDifferentNamespacesApart(t *testing.T) {
 	}}
 	g := gatherer(t, p)
 
-	got, err := g.chunked(context.Background(), "m", "count_over_time", sched, base, end, sumCombine)
+	got, _, err := g.chunked(context.Background(), "m", "count_over_time", sched, base, end, sumCombine)
 	if err != nil {
 		t.Fatalf("chunked: %v", err)
 	}
 	if len(got) != 2 {
 		t.Fatalf("got %d results for team-a/trainer and team-b/trainer on one card, want 2. "+
 			"Merging them attributes one team's samples to the other: %v", len(got), got)
+	}
+}
+
+// A surviving chunk must not be presented as if it covered the whole window.
+//
+// This is the failure mode that would get the tool banned. The "was it ever
+// non-zero" answer and the sample count come from two different queries, so a
+// device whose older max chunks failed while its count query succeeded reported
+// max=0 at full coverage — indistinguishable from a genuinely idle GPU, and the
+// checks believe coverage. A device that ran flat out on the day Prometheus
+// could not answer for would be recommended for deletion.
+func TestChunkedReportsHowMuchOfTheWindowItAnsweredFor(t *testing.T) {
+	end := base.Add(48 * time.Hour)
+	labels := map[string]string{"Hostname": "gpu-a", "gpu": "0"}
+	p := &promStub{
+		byTime: map[string][]map[string]any{instantOf(end): {vec(labels, end, 0)}},
+		fail:   map[string]bool{instantOf(end.Add(-24 * time.Hour)): true},
+	}
+	g := gatherer(t, p)
+
+	got, covered, err := g.chunked(context.Background(), "m", "max_over_time", sched, base, end, maxCombine)
+	if err != nil {
+		t.Fatalf("chunked: %v", err)
+	}
+	if len(got) != 1 || got[0].Value != 0 {
+		t.Fatalf("got %v, want the surviving chunk reporting zero", got)
+	}
+	if covered > 0.75 {
+		t.Fatalf("covered = %.2f after half the window failed to answer; a zero from the "+
+			"other half is about to be believed as a fortnight of idleness", covered)
+	}
+	if covered == 0 {
+		t.Fatal("covered = 0 despite one chunk succeeding; that would discard usable evidence")
+	}
+}
+
+// Cancellation is the end of the scan, not a gap in the data.
+//
+// The dangerous case is cancellation *after* a chunk has already succeeded:
+// the loop had one good answer, so it reported success and returned evidence
+// covering a fraction of the window with no indication that the rest was never
+// asked. A scan killed by a timeout would silently become a scan that found
+// every GPU idle.
+func TestChunkedRefusesToReturnPartialEvidenceAfterCancellation(t *testing.T) {
+	end := base.Add(72 * time.Hour)
+	labels := map[string]string{"Hostname": "gpu-a", "gpu": "0"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	var served int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		served++
+		// The newest chunk is answered in full and the scan is cancelled only
+		// once the next one is asked for. Cancelling while the first response
+		// is still being read would fail that chunk too, and then every chunk
+		// has failed -- which the code already handles. The bug being pinned
+		// here is the opposite: one good chunk making the whole read look
+		// complete.
+		if served > 1 {
+			cancel()
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "success",
+			"data": map[string]any{
+				"resultType": "vector",
+				"result":     []map[string]any{vec(labels, end, 0)},
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	g := &Gatherer{Prom: promql.New(promql.Config{URL: srv.URL})}
+
+	got, covered, err := g.chunked(ctx, "m", "max_over_time", sched, base, end, maxCombine)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("chunked returned %d samples at %.2f coverage and err=%v after the scan was "+
+			"cancelled mid-window; one answered chunk must not be reported as a completed read",
+			len(got), covered, err)
+	}
+	if served > 2 {
+		t.Errorf("kept querying after cancellation: %d requests served", served)
 	}
 }

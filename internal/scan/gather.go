@@ -254,7 +254,12 @@ const chunk = 24 * time.Hour
 func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *inventory.Inventory, start, end time.Time, step time.Duration) ([]inventory.Device, bool, error) {
 	window := end.Sub(start)
 
-	maxUtil, err := g.chunked(ctx, MetricGPUUtil, "max_over_time", schema, start, end, maxCombine)
+	// maxCovered is the fraction of the window the "was it ever non-zero"
+	// question was actually answered for. It is the most important number in
+	// this function: an interval with no answer is an interval where the device
+	// might have been at 100%, and treating it as zero is precisely how a tool
+	// recommends deleting a busy GPU.
+	maxUtil, maxCovered, err := g.chunked(ctx, MetricGPUUtil, "max_over_time", schema, start, end, maxCombine)
 	if err != nil {
 		return nil, false, err
 	}
@@ -271,7 +276,10 @@ func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *
 		powerWindow = window
 	}
 	avgPower, _ := g.instant(ctx, fmt.Sprintf("avg_over_time(%s[%s])", MetricPower, promql.Range(powerWindow)), end)
-	samples, _ := g.chunked(ctx, MetricGPUUtil, "count_over_time", schema, start, end, sumCombine)
+	samples, _, err := g.chunked(ctx, MetricGPUUtil, "count_over_time", schema, start, end, sumCombine)
+	if err != nil && ctx.Err() != nil {
+		return nil, false, ctx.Err()
+	}
 
 	// The sparkline and "when did work last happen" need shape, not precision,
 	// so they use one coarse range query at an hourly step: 336 points per
@@ -350,8 +358,14 @@ func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *
 			Max:            s.Value,
 			ZeroThroughout: s.Value == 0,
 			FallowSince:    start,
-			Completeness:   clamp(samplesBy[key]/expected, 0, 1),
-			Samples:        int(seriesSamplesBy[seriesKey(s.Labels, schema)]),
+			// Capped by how much of the window the max query answered for.
+			// Sample counts come from a separate query, so without this cap a
+			// device whose max chunks half failed still reports full coverage
+			// and its zero is believed. The checks gate on completeness, so
+			// this turns a partial read into a rejected finding rather than a
+			// confident wrong one.
+			Completeness: clamp(samplesBy[key]/expected, 0, 1) * maxCovered,
+			Samples:      int(seriesSamplesBy[seriesKey(s.Labels, schema)]),
 		}
 		if series, ok := shapeBy[seriesKey(s.Labels, schema)]; ok {
 			refine(&d.Util, series, start, end, step)
@@ -411,24 +425,33 @@ func refine(st *inventory.Stats, s promql.Series, start, end time.Time, step tim
 func (g *Gatherer) chunked(
 	ctx context.Context, metric, fn string, schema promql.LabelSchema, start, end time.Time,
 	combine func(a, b float64) float64,
-) ([]promql.VectorSample, error) {
+) ([]promql.VectorSample, float64, error) {
 	acc := map[string]*promql.VectorSample{}
 	var order []string
 	var lastErr error
 	ok := false
+	var answered, total time.Duration
 
 	for at := end; at.After(start); at = at.Add(-chunk) {
 		span := chunk
 		if rem := at.Sub(start); rem < span {
 			span = rem
 		}
+		total += span
 		q := fmt.Sprintf("%s(%s[%s])", fn, metric, promql.Range(span))
 		got, err := g.instant(ctx, q, at)
 		if err != nil {
+			// Cancellation is not a gap in the data, it is the end of the
+			// scan. Continuing would spend the remaining chunks failing and
+			// then report the partial result as if it were the whole window.
+			if ctx.Err() != nil {
+				return nil, 0, ctx.Err()
+			}
 			lastErr = err
 			continue
 		}
 		ok = true
+		answered += span
 		for _, s := range got {
 			// seriesKey, not an ad-hoc key: identity here has to mean exactly
 			// what it means everywhere else. Concatenating the pod labels
@@ -449,13 +472,17 @@ func (g *Gatherer) chunked(
 		if lastErr == nil {
 			lastErr = promql.ErrNoSeries
 		}
-		return nil, lastErr
+		return nil, 0, lastErr
+	}
+	covered := 1.0
+	if total > 0 {
+		covered = float64(answered) / float64(total)
 	}
 	out := make([]promql.VectorSample, 0, len(order))
 	for _, k := range order {
 		out = append(out, *acc[k])
 	}
-	return out, nil
+	return out, covered, nil
 }
 
 func maxCombine(a, b float64) float64 {
