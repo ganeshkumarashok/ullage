@@ -295,7 +295,12 @@ func enrich(cl *inventory.Cluster, rf check.RawFinding, opts Options) api.Findin
 	// Fallow hours are device-hours, so a finding covering four devices for a
 	// day is four times one covering one. This is the only ranking signal, and
 	// it is the one a reader can verify by hand.
-	f.Impact.GPUHoursFallow = float64(f.TotalAccelerators()) * rf.Fallow.Hours()
+	// Every device's own idle time, added up. Falling back to the product is
+	// only correct when the devices really were all fallow together.
+	f.Impact.GPUHoursFallow = rf.FallowHours
+	if f.Impact.GPUHoursFallow == 0 {
+		f.Impact.GPUHoursFallow = float64(f.TotalAccelerators()) * rf.Fallow.Hours()
+	}
 	priceFinding(&f, opts.Pricing)
 	return f
 }

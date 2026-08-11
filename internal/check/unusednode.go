@@ -145,10 +145,20 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 	}
 
 	type poolAgg struct {
-		nodes    []string
-		devices  int
-		oldest   time.Duration
-		blockers []api.Blocker
+		nodes   []string
+		devices int
+		oldest  time.Duration
+
+		// Each node's own empty time multiplied by its own accelerator count,
+		// added up. oldest is the pool's longest, and billing every device in
+		// the pool for the longest is how a pool with one long-idle node and
+		// nine briefly-idle ones reports ten times the waste that occurred.
+		hours float64
+		// nodeHours keyed by node, so a finding narrowed to a subset of the
+		// pool -- what an autoscaler floor produces -- can re-add only the
+		// nodes it kept.
+		nodeHours map[string]float64
+		blockers  []api.Blocker
 
 		// The reported fallow duration is the longest across the pool, so the
 		// evidence label has to describe *that* node. Recording only that some
@@ -228,6 +238,9 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 		}
 		agg.nodes = append(agg.nodes, node.Name)
 		agg.devices += node.Accelerators
+		if agg.nodeHours == nil {
+			agg.nodeHours = map[string]float64{}
+		}
 
 		// How long has this been fallow? The node's age is only an upper bound
 		// — it says how long the node *could* have been empty, not how long it
@@ -271,6 +284,9 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 		} else {
 			agg.anyUnmeasured = true
 		}
+		agg.nodeHours[node.Name] = float64(node.Accelerators) * empty.Hours()
+		agg.hours += agg.nodeHours[node.Name]
+
 		// Provenance travels with the number it describes.
 		if empty > agg.oldest {
 			agg.oldest = empty
@@ -303,7 +319,11 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 		sort.Strings(agg.nodes)
 
 		fallow := agg.oldest
+		hours := agg.hours
 		if fallow > cl.Window {
+			// Capping the headline has to cap the total too, or the two
+			// numbers in the same row disagree.
+			hours *= cl.Window.Hours() / fallow.Hours()
 			fallow = cl.Window
 		}
 
@@ -341,9 +361,10 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 				Pool:  pool,
 				Nodes: agg.nodes,
 			},
-			Devices:    nodeDeviceIDs(cl, agg.nodes),
-			Fallow:     fallow,
-			Confidence: durationConfidence(agg.oldestMeasured, agg.oldestAnySeries),
+			Devices:     nodeDeviceIDs(cl, agg.nodes),
+			Fallow:      fallow,
+			FallowHours: hours,
+			Confidence:  durationConfidence(agg.oldestMeasured, agg.oldestAnySeries),
 			Evidence: api.Evidence{
 				Window:             api.ISODuration(cl.Window),
 				FallowDuration:     api.ISODuration(fallow),
@@ -394,7 +415,7 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 		case held:
 			// Part deliberate, part not. Which specific nodes the autoscaler
 			// would remove is its choice, so the finding is about the count.
-			f = narrowToNodes(cl, f, agg.nodes[:reclaimable])
+			f = narrowToNodes(cl, f, agg.nodes[:reclaimable], agg.nodeHours)
 			f.Evidence.Notes = append(f.Evidence.Notes, fmt.Sprintf(
 				"pool/%s is %s; %d of its %d %s are counted against that floor and excluded here, "+
 					"leaving %d that the floor does not explain",
@@ -438,9 +459,17 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 // the finding is that every number in it is traceable to specific hardware. A
 // pool finding that claims six accelerators while naming three nodes holding
 // eight is not a rounding error, it is the tool losing the thread.
-func narrowToNodes(cl *inventory.Cluster, f RawFinding, nodes []string) RawFinding {
+func narrowToNodes(cl *inventory.Cluster, f RawFinding, nodes []string, nodeHours map[string]float64) RawFinding {
 	f.Subject.Nodes = nodes
 	f.Devices = nodeDeviceIDs(cl, nodes)
+
+	// The hours have to be re-added from the nodes that were kept. Carrying
+	// the whole pool's total onto a narrowed finding would bill the operator
+	// for the reserved nodes this narrowing exists to exclude.
+	f.FallowHours = 0
+	for _, n := range nodes {
+		f.FallowHours += nodeHours[n]
+	}
 	return f
 }
 

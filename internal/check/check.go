@@ -98,8 +98,26 @@ type RawFinding struct {
 	// computes fallow hours without the check doing arithmetic.
 	Devices []string
 
-	// Fallow is how long the devices have been doing nothing.
+	// Fallow is how long the devices have been doing nothing. When they have
+	// not all been fallow for the same length of time it is the longest, which
+	// is the right headline — "this has been going on for two weeks" — but the
+	// wrong thing to bill for.
 	Fallow time.Duration
+
+	// FallowHours is the actual accelerator-hours wasted: every device's own
+	// fallow duration, added up.
+	//
+	// It is a separate number because Fallow is a maximum and multiplying a
+	// maximum by a device count invents waste that never happened. One
+	// accelerator idle a fortnight beside nine idle a day is 23 device-days,
+	// not 140. Findings are ranked by this figure and priced from it, so the
+	// error promoted the wrong work to the top of the report and inflated the
+	// cluster total that the whole tool is built to state.
+	//
+	// Zero means the check did not distinguish, and the pipeline falls back to
+	// the product — correct when a single pod holds every device, which is the
+	// only case where it now happens.
+	FallowHours float64
 
 	Confidence string
 	Evidence   api.Evidence

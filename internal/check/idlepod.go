@@ -62,6 +62,9 @@ func (c IdlePod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Ra
 		pods    []inventory.PodRef
 		devices []inventory.Device
 		fallow  time.Duration
+		// Per-device idle time, so the group can be billed for what each
+		// device actually wasted rather than for its longest member.
+		hours float64
 		// The coverage the gate actually judged, carried so the report prints
 		// the number it decided on rather than a differently-derived one.
 		completeness float64
@@ -102,6 +105,7 @@ func (c IdlePod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Ra
 		}
 
 		idle, fallow, completeness := true, cl.Window, 1.0
+		each := map[string]time.Duration{}
 		for _, d := range devs {
 			if !c.Applicable(d) {
 				idle = false
@@ -122,6 +126,7 @@ func (c IdlePod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Ra
 			if since < fallow {
 				fallow = since
 			}
+			each[d.ID] = since
 			// The holder's own series, not the physical device's summed
 			// coverage: a GPU recycled from a previous job carries that job's
 			// samples, and letting them count here would have this pod borrow
@@ -158,6 +163,16 @@ func (c IdlePod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Ra
 		if fallow > g.fallow {
 			g.fallow = fallow
 		}
+		// Each device is capped by the pod's own lifetime for the same reason
+		// the headline is: a device cannot have been idle under a pod for
+		// longer than the pod has existed.
+		for _, d := range devs {
+			own := each[d.ID]
+			if own > span {
+				own = span
+			}
+			g.hours += own.Hours()
+		}
 	}
 
 	sort.Strings(order)
@@ -180,12 +195,13 @@ func (c IdlePod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Ra
 			PartialOwner: len(g.pods) < running[key],
 		}
 		out = append(out, RawFinding{
-			Check:      api.CheckIdlePod,
-			Subject:    subject,
-			Devices:    deviceIDs(g.devices),
-			Fallow:     g.fallow,
-			Confidence: conf,
-			Evidence:   ev,
+			Check:       api.CheckIdlePod,
+			Subject:     subject,
+			Devices:     deviceIDs(g.devices),
+			Fallow:      g.fallow,
+			FallowHours: g.hours,
+			Confidence:  conf,
+			Evidence:    ev,
 			Summary: fmt.Sprintf("%d %s held with no work for %s",
 				len(g.devices), humanize.Plural(len(g.devices), "accelerator"),
 				humanize.Duration(g.fallow)),

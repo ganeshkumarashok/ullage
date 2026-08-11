@@ -9,8 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ullage-project/ullage/internal/check"
+	"github.com/ullage-project/ullage/internal/inventory"
 	"github.com/ullage-project/ullage/internal/kube"
 	"github.com/ullage-project/ullage/internal/promql"
+	"github.com/ullage-project/ullage/pkg/ullage/api"
 )
 
 // enginePromise is a fake Prometheus that answers per-metric, so a test can say
@@ -193,5 +196,76 @@ func TestMissingEngineMetricsAreDisclosedNotAssumedIdle(t *testing.T) {
 		t.Fatalf("only the SM gauge was available and the report does not say so, so a "+
 			"reader cannot tell this scan from one that ruled out encoder and copy-engine "+
 			"work: %q", warnings)
+	}
+}
+
+// The check computes the honest per-device total; the pipeline is what turns it
+// into the number the report prints, prices and ranks by. Without this, the
+// wiring between them can be cut and every check-level test still passes.
+func TestEnrichBillsTheSummedFallowHoursNotTheProduct(t *testing.T) {
+	cl := &inventory.Cluster{
+		Context: "test",
+		Now:     time.Date(2026, 8, 11, 0, 0, 0, 0, time.UTC),
+		Window:  14 * 24 * time.Hour,
+		Devices: []inventory.Device{
+			{ID: "n/0", Node: "n", Pool: "gpu", Model: "NVIDIA-A100-SXM4-80GB",
+				Vendor: "nvidia", Allocation: api.AllocExclusive, Analyzable: true},
+			{ID: "n/1", Node: "n", Pool: "gpu", Model: "NVIDIA-A100-SXM4-80GB",
+				Vendor: "nvidia", Allocation: api.AllocExclusive, Analyzable: true},
+		},
+		Nodes: []inventory.NodeView{{
+			Name: "n", Pool: "gpu", Ready: true, Accelerators: 2,
+			Model: "NVIDIA-A100-SXM4-80GB", Vendor: "nvidia",
+			Allocation: api.AllocExclusive,
+		}},
+	}
+	rf := check.RawFinding{
+		Check:   api.CheckUnusedNode,
+		Subject: check.Subject{Kind: "node-pool", Name: "gpu", Pool: "gpu", Nodes: []string{"n"}},
+		Devices: []string{"n/0", "n/1"},
+		// One device idle a fortnight, one idle a day: 360 device-hours, not
+		// the 672 that two devices times the longest run would give.
+		Fallow:      14 * 24 * time.Hour,
+		FallowHours: 14*24 + 24,
+		Confidence:  api.EvidenceHigh,
+	}
+
+	got := enrich(cl, rf, Options{}).Impact.GPUHoursFallow
+	if got != 360 {
+		t.Fatalf("GPUHoursFallow = %.0f, want 360: the check measured 360 device-hours and "+
+			"the pipeline reported %.0f, so the honest figure never reaches the report, "+
+			"the ranking or the price", got, got)
+	}
+}
+
+// And the fallback still applies, because a check that holds every device under
+// a single pod has nothing to distinguish and should not be forced to.
+func TestEnrichFallsBackToTheProductWhenNoTotalIsGiven(t *testing.T) {
+	cl := &inventory.Cluster{
+		Context: "test",
+		Now:     time.Date(2026, 8, 11, 0, 0, 0, 0, time.UTC),
+		Window:  14 * 24 * time.Hour,
+		Devices: []inventory.Device{
+			{ID: "n/0", Node: "n", Pool: "gpu", Model: "NVIDIA-A100-SXM4-80GB",
+				Vendor: "nvidia", Allocation: api.AllocExclusive, Analyzable: true},
+			{ID: "n/1", Node: "n", Pool: "gpu", Model: "NVIDIA-A100-SXM4-80GB",
+				Vendor: "nvidia", Allocation: api.AllocExclusive, Analyzable: true},
+		},
+		Nodes: []inventory.NodeView{{
+			Name: "n", Pool: "gpu", Ready: true, Accelerators: 2,
+			Model: "NVIDIA-A100-SXM4-80GB", Vendor: "nvidia",
+			Allocation: api.AllocExclusive,
+		}},
+	}
+	rf := check.RawFinding{
+		Check:      api.CheckUnusedNode,
+		Subject:    check.Subject{Kind: "node-pool", Name: "gpu", Pool: "gpu", Nodes: []string{"n"}},
+		Devices:    []string{"n/0", "n/1"},
+		Fallow:     48 * time.Hour,
+		Confidence: api.EvidenceHigh,
+	}
+
+	if got := enrich(cl, rf, Options{}).Impact.GPUHoursFallow; got != 96 {
+		t.Fatalf("GPUHoursFallow = %.0f, want 96 from two devices times 48h", got)
 	}
 }
