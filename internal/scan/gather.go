@@ -166,12 +166,21 @@ func (g *Gatherer) Gather(ctx context.Context, opts Options) (*inventory.Cluster
 				"deliberately reserved capacity could not be distinguished from unused capacity")
 	}
 
-	pdbs, _ := g.Kube.PodDisruptionBudgets(ctx)
+	// Whether a PodDisruptionBudget forbids evicting a pod is the difference
+	// between "this node can be reclaimed" and a command that will hang. An
+	// unreadable list is not an empty list, and treating it as one produces
+	// the confident version of the wrong answer.
+	pdbs, pdbErr := g.Kube.PodDisruptionBudgets(ctx)
+	if pdbErr != nil {
+		warnings = append(warnings, fmt.Sprintf(
+			"PodDisruptionBudgets are not readable (%v), so pods are reported as possibly "+
+				"blocking scale-down rather than assumed safe to evict", pdbErr))
+	}
 
 	opts.Progress("Resolving workload owners")
 	resolver := NewResolver(g.Kube)
 	for i := range pods {
-		cl.Pods = append(cl.Pods, g.podView(ctx, resolver, &pods[i], nsByName, pdbs, draByPod, end))
+		cl.Pods = append(cl.Pods, g.podView(ctx, resolver, &pods[i], nsByName, pdbs, pdbErr == nil, draByPod, end))
 	}
 	for name, ni := range inv.Nodes {
 		kpool, _ := kube.NodePoolOf(ni.Node)
@@ -567,7 +576,7 @@ func clamp(v, lo, hi float64) float64 {
 
 // podView normalizes one pod, resolving provenance and ownership up front so no
 // check ever has to.
-func (g *Gatherer) podView(ctx context.Context, r *Resolver, p *kube.Pod, nsByName map[string]*kube.ObjectMeta, pdbs []kube.PodDisruptionBudget, draByPod map[string]int, now time.Time) inventory.PodView {
+func (g *Gatherer) podView(ctx context.Context, r *Resolver, p *kube.Pod, nsByName map[string]*kube.ObjectMeta, pdbs []kube.PodDisruptionBudget, pdbsReadable bool, draByPod map[string]int, now time.Time) inventory.PodView {
 	gpus, _ := p.GPURequest()
 	// Under DRA the extended resource is absent entirely, so a pod holding four
 	// L40S through a ResourceClaim requests literally nothing countable. Adding
@@ -619,7 +628,7 @@ func (g *Gatherer) podView(ctx context.Context, r *Resolver, p *kube.Pod, nsByNa
 		}
 	}
 	view.IsDaemonSet = prov.RootKind == "DaemonSet"
-	view.Evictable, view.BlockReason = evictability(p, prov, pdbs)
+	view.Evictable, view.BlockReason = evictability(p, prov, pdbs, pdbsReadable)
 	return view
 }
 
@@ -628,7 +637,7 @@ func (g *Gatherer) podView(ctx context.Context, r *Resolver, p *kube.Pod, nsByNa
 // This is the substance of the unused-node check: an empty node is visible in
 // any dashboard, but the reason the autoscaler cannot reclaim it is not visible
 // anywhere.
-func evictability(p *kube.Pod, prov api.Provenance, pdbs []kube.PodDisruptionBudget) (bool, string) {
+func evictability(p *kube.Pod, prov api.Provenance, pdbs []kube.PodDisruptionBudget, pdbsReadable bool) (bool, string) {
 	// Infrastructure DaemonSets are supposed to be there. dcgm-exporter, the
 	// device plugin, CNI and CSI pods on an empty node are normal, and the
 	// autoscaler ignores them, so calling them blockers would be a false alarm
@@ -651,6 +660,13 @@ func evictability(p *kube.Pod, prov api.Provenance, pdbs []kube.PodDisruptionBud
 		// The autoscaler will not evict a pod no controller would recreate.
 		return false, "not managed by a controller, so the autoscaler will not evict it"
 	}
+	// Said after the checks above, not before: a DaemonSet pod or an annotated
+	// one has a definite answer that no budget changes, and reporting "we could
+	// not check" for every dcgm-exporter in the cluster would bury the cases
+	// where the doubt is real.
+	if !pdbsReadable {
+		return false, "PodDisruptionBudgets could not be read, so whether this pod can be evicted is unknown"
+	}
 	for _, pdb := range pdbs {
 		if pdb.Metadata.Namespace != p.Metadata.Namespace || pdb.Status.DisruptionsAllowed != 0 {
 			continue
@@ -661,7 +677,7 @@ func evictability(p *kube.Pod, prov api.Provenance, pdbs []kube.PodDisruptionBud
 		}
 		if matched && !certain {
 			return false, "PodDisruptionBudget " + pdb.Metadata.Name +
-				" may apply (its selector uses matchExpressions, which ullage does not evaluate)"
+				" may apply (its selector uses an operator ullage does not recognise)"
 		}
 	}
 	return true, ""

@@ -23,6 +23,9 @@ import (
 type fakeAPI struct {
 	deny   bool
 	denied bool
+
+	denyPDBs   bool
+	deniedPDBs bool
 }
 
 func (f *fakeAPI) handler(t *testing.T) http.Handler {
@@ -58,11 +61,27 @@ func (f *fakeAPI) handler(t *testing.T) http.Handler {
 				},
 			})
 
+		case strings.HasSuffix(path, "/poddisruptionbudgets"):
+			if f.denyPDBs {
+				f.deniedPDBs = true
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"kind":"Status","code":403,"message":"poddisruptionbudgets is forbidden"}`))
+				return
+			}
+			write(w)
+
 		case strings.HasSuffix(path, "/pods"):
 			write(w, map[string]any{
 				"metadata": map[string]any{
 					"name": "trainer", "namespace": "research", "uid": "pod-1",
 					"creationTimestamp": "2026-07-01T00:00:00Z",
+					"labels":            map[string]any{"app": "trainer"},
+					// Owned, because an uncontrolled pod is unevictable for a
+					// different reason and would never reach the budget check.
+					"ownerReferences": []any{map[string]any{
+						"apiVersion": "apps/v1", "kind": "StatefulSet",
+						"name": "trainer", "uid": "sts-1", "controller": true,
+					}},
 				},
 				"spec": map[string]any{
 					"nodeName":       node,
@@ -87,6 +106,20 @@ func (f *fakeAPI) handler(t *testing.T) http.Handler {
 					"allocatable": map[string]any{"nvidia.com/gpu": "1"},
 					"conditions":  []any{map[string]any{"type": "Ready", "status": "True"}},
 				},
+			})
+
+		case strings.Contains(path, "/statefulsets/"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"apiVersion": "apps/v1", "kind": "StatefulSet",
+				"metadata": map[string]any{"name": "trainer", "namespace": "research", "uid": "sts-1"},
+			})
+
+		case strings.HasSuffix(path, "/apis/apps/v1"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"resources": []any{map[string]any{
+					"name": "statefulsets", "kind": "StatefulSet", "namespaced": true}},
 			})
 
 		case strings.HasSuffix(path, "/version"):
@@ -231,5 +264,44 @@ func TestGatherSeesDRAOccupancyWhenClaimsAreReadable(t *testing.T) {
 	}
 	if !cl.Pods[0].Occupies() {
 		t.Fatalf("the pod holds a device through an allocated ResourceClaim but Occupies() is false: %+v", cl.Pods[0])
+	}
+}
+
+// Whether a PodDisruptionBudget forbids evicting a pod decides whether an
+// "unused" node can actually be reclaimed. `pdbs, _ :=` turned an unreadable
+// list into an empty one, and an empty list means nothing blocks anything --
+// the confident version of the wrong answer, on a cluster where RBAC simply
+// does not grant policy/v1.
+func TestGatherWillNotAssumePodsAreEvictableWhenPDBsAreUnreadable(t *testing.T) {
+	api := &fakeAPI{denyPDBs: true}
+	g, opts, _ := gatherAgainst(t, api)
+
+	cl, _, warnings, err := g.Gather(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if !api.deniedPDBs {
+		t.Fatal("the test never exercised the forbidden PDB read")
+	}
+	if len(cl.Pods) != 1 {
+		t.Fatalf("got %d pods, want 1", len(cl.Pods))
+	}
+	if cl.Pods[0].Evictable {
+		t.Fatal("policy/v1 was forbidden, so nothing is known about what blocks a drain, " +
+			"but the pod was reported as safe to evict")
+	}
+	if !strings.Contains(cl.Pods[0].BlockReason, "could not be read") {
+		t.Fatalf("BlockReason = %q; it has to say the list was unreadable, or the operator "+
+			"reads it as a real budget that does not exist", cl.Pods[0].BlockReason)
+	}
+
+	var mentioned bool
+	for _, w := range warnings {
+		if strings.Contains(w, "PodDisruptionBudget") {
+			mentioned = true
+		}
+	}
+	if !mentioned {
+		t.Fatalf("nothing warned that PDBs were unreadable: %q", warnings)
 	}
 }

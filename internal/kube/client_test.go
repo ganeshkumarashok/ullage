@@ -320,19 +320,12 @@ func TestProviderIsInferredFromProviderID(t *testing.T) {
 // A selector that cannot be evaluated must report that it could not be
 // evaluated. Silently returning "no match" turns an unknown into a licence to
 // recommend eviction.
+//
+// The operators themselves are covered exhaustively in selector_test.go. Two
+// subtests once lived here asserting that matchExpressions were unevaluable and
+// that `{}` matched nothing; the second said in its own failure message that
+// Kubernetes means the opposite. Both are now implemented rather than dodged.
 func TestLabelSelectorReportsWhenItCannotDecide(t *testing.T) {
-	t.Run("matchExpressions are not understood and say so", func(t *testing.T) {
-		s := &LabelSelector{
-			MatchLabels:      map[string]string{"app": "trainer"},
-			MatchExpressions: []LabelSelectorRequirement{{Key: "tier", Operator: "In"}},
-		}
-		_, ok := s.Matches(map[string]string{"app": "trainer"})
-		if ok {
-			t.Fatal("a selector with matchExpressions claimed a definite answer; treating an " +
-				"unparsed PDB as non-matching removes the blocker that explains why a node " +
-				"cannot drain")
-		}
-	})
 	t.Run("a nil selector is a definite non-match", func(t *testing.T) {
 		var s *LabelSelector
 		matched, ok := s.Matches(map[string]string{"app": "x"})
@@ -347,14 +340,6 @@ func TestLabelSelectorReportsWhenItCannotDecide(t *testing.T) {
 		}
 		if matched, ok := s.Matches(map[string]string{"app": "other"}); matched || !ok {
 			t.Fatalf("matched=%v ok=%v, want false,true", matched, ok)
-		}
-	})
-	t.Run("an empty selector matches nothing rather than everything", func(t *testing.T) {
-		s := &LabelSelector{}
-		if matched, _ := s.Matches(map[string]string{"app": "x"}); matched {
-			t.Fatal("an empty selector matched a pod; in Kubernetes an empty PDB selector " +
-				"matches every pod in the namespace, and guessing either way here would " +
-				"attach a blocker to every finding or to none")
 		}
 	})
 }

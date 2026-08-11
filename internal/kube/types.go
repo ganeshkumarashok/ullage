@@ -397,8 +397,19 @@ type LabelSelectorRequirement struct {
 }
 
 // Matches reports whether a label set satisfies the selector, and whether the
-// answer is trustworthy. An unsupported matchExpressions clause returns
-// ok=false so the caller can say "unknown" rather than "no".
+// answer is trustworthy. Only a genuinely unrecognised operator returns
+// ok=false, so the caller can say "unknown" rather than "no".
+//
+// Two pieces of Kubernetes trivia are load-bearing here, and getting either
+// wrong turns "a PodDisruptionBudget forbids this" into "go ahead":
+//
+//   - A null selector matches no pods; an empty one, `{}`, matches every pod
+//     in the namespace. They are opposite answers and they differ by two
+//     characters of JSON.
+//   - matchLabels and matchExpressions are ANDed, and an empty list of either
+//     is vacuously satisfied. A selector that is only matchExpressions is
+//     completely ordinary, and treating it as matching nothing — which
+//     returning `len(MatchLabels) > 0` did — silently ignored the budget.
 func (s *LabelSelector) Matches(labels map[string]string) (matched, ok bool) {
 	if s == nil {
 		return false, true
@@ -408,10 +419,45 @@ func (s *LabelSelector) Matches(labels map[string]string) (matched, ok bool) {
 			return false, true
 		}
 	}
-	if len(s.MatchExpressions) > 0 {
-		return len(s.MatchLabels) > 0, false
+	for _, e := range s.MatchExpressions {
+		v, present := labels[e.Key]
+		switch strings.ToLower(e.Operator) {
+		case "in":
+			if !present || !contains(e.Values, v) {
+				return false, true
+			}
+		case "notin":
+			// An absent key satisfies NotIn: the pod is not in the set.
+			if present && contains(e.Values, v) {
+				return false, true
+			}
+		case "exists":
+			if !present {
+				return false, true
+			}
+		case "doesnotexist":
+			if present {
+				return false, true
+			}
+		default:
+			// A new operator, or a malformed one. Saying "does not match" here
+			// would quietly discard a real budget, so the caller is told the
+			// selector may apply and cannot be evaluated.
+			return true, false
+		}
 	}
-	return len(s.MatchLabels) > 0, true
+	// Everything ANDed was satisfied, including the vacuous case of a `{}`
+	// selector, which is the documented "all pods in this namespace".
+	return true, true
+}
+
+func contains(vs []string, v string) bool {
+	for _, x := range vs {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }
 
 // ResourceClaim is the DRA allocation object. ullage does not interpret it in
