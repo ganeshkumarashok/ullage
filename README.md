@@ -2,46 +2,53 @@
 
 **The GPU your cluster paid for and didn't use.**
 
-*Ullage* (n.) — the amount by which a container falls short of being full.
-
 `ullage` measures the accelerator capacity a Kubernetes cluster is paying for
 and not using, attributes it to the workload and the person responsible, and
 tells you the one command that will actually free it.
 
 It is a measurement, not a verdict. It never writes to your cluster.
 
+Try it right now, against a built-in fake cluster, with no Kubernetes and no
+Prometheus:
+
 ```console
-$ ullage demo
+$ git clone https://github.com/ullage-project/ullage && cd ullage
+$ make demo
 ```
 
 ```
-ullage v0.1.0  prod-westus3  window 14d
+ullage v0.1.0-dev  demo  window 14d
 
-  5.6k of 23k accelerator-hours fallow (25%)
+  5.9k of 23k accelerator-hours fallow (26%)
   60 of 68 accelerators analysed  (8 excluded, see below)
 
-      WORKLOAD                    GPUS   ULLAGE    FOR OWNER           
-  1.  research/jupyter-alice         3     1.0k    14d alice@…         
+      WORKLOAD                      GPUS   ULLAGE    FOR OWNER           
+  1.  research/jupyter-alice           3     1.0k    14d alice@…         
       3 pods, no GPU work since the window began · owned by StatefulSet
       ~$3,427  ·  3 × NVIDIA-A100-SXM4-80GB
 
-  2.  pool/l4-serving                8     2.7k    14d platform        
+  2.  pool/l4-serving                  8     2.7k    14d platform        
       2 nodes, nothing scheduled · 2 pods block scale-down
       ~$2,016  ·  8 × NVIDIA-L4
 
-  3.  research/dra-sandbox-erin      4     1.1k    11d erin@…          
-      no GPU work since 31 Jul 04:00
-      ~$1,696  ·  4 × NVIDIA-L40S
+  3.  research/dra-sandbox-erin        4     1.1k    11d erin@…          
+      no GPU work since 31 Jul 06:00
+      ~$1,690  ·  4 × NVIDIA-L40S
 
-  4.  research/scratch-pod-bob       2      434     9d bob@…           
-      no GPU work since 2 Aug 04:00
-      ~$1,476  ·  2 × NVIDIA-A100-SXM4-80GB
+  4.  research/scratch-pod-bob         2      432     9d bob@…           
+      no GPU work since 2 Aug 06:00
+      ~$1,469  ·  2 × NVIDIA-A100-SXM4-80GB
 
-  5.  ml-platform/finetune-carol     1      336    14d ml-platform@…   
+  5.  ml-platform/finetune-carol       1      336    14d ml-platform@…   
       no GPU work since the window began · owned by Notebook (no safe automatic fix)
       ~$1,142  ·  1 × NVIDIA-A100-SXM4-80GB
 
-  6.  serving/embed-v2               1       96     4d serving-team@…  
+  6.  research/gappy-session-frank     1      240    10d …arch-platform@…
+      no GPU work since 1 Aug 06:00
+      ~$816  ·  1 × NVIDIA-A100-SXM4-80GB
+      confidence: medium — sample coverage is incomplete over the window
+
+  7.  serving/embed-v2                 1       96     4d serving-team@…  
       CrashLoopBackOff
       ~$326  ·  1 × NVIDIA-A100-SXM4-80GB
 
@@ -75,6 +82,10 @@ ullage v0.1.0  prod-westus3  window 14d
         shows the evidence, the owner, and the exact command to fix it
 ```
 
+Every number above is computed, not canned. The fake cluster it reads is a
+real API server and a real Prometheus, both served from memory, so the demo
+exercises the same code a real scan does.
+
 ## Why another tool
 
 Every GPU dashboard can already show you a utilization graph. None of them
@@ -106,6 +117,26 @@ co-tenant. The accelerator census always reconciles: analysed plus excluded
 equals observed. A percentage over a denominator you cannot account for turns a
 monitoring gap into a claim about efficiency.
 
+### How it compares
+
+| | what it answers | acts on the cluster |
+|---|---|---|
+| **ullage** | which accelerators were paid for and idle, whose they are, and the one command that frees them | no — read-only by construction |
+| [Robusta KRR](https://github.com/robusta-dev/krr) | what CPU/memory requests should be, from usage history | no — prints recommendations |
+| [OpenCost](https://www.opencost.io/) | what each workload cost, including GPU | no — allocation and showback |
+| [Kubecost](https://www.kubecost.com/) | cost allocation, with efficiency and savings reports | optional automation in the paid tiers |
+| [Cast AI](https://cast.ai/) | how to run the same workloads for less | yes — bin-packs and replaces nodes |
+| [nvidia-dcgm-exporter](https://github.com/NVIDIA/dcgm-exporter) | per-device utilization metrics | no — it is the data source ullage reads |
+
+KRR is the closest in spirit and the clearest influence: right-sizing from
+observed usage, delivered as a recommendation rather than an action. It does not
+cover accelerators, which are the expensive part of a GPU cluster and the part
+whose idleness is hardest to read from a utilization metric.
+
+OpenCost and Kubecost answer *what did this cost*. `ullage` answers *what did
+this cost for nothing, and what do I type to stop it*. They compose: run
+OpenCost for allocation, `ullage` for the subset that bought nothing.
+
 ## What it will not do
 
 - **It will not call a workload inefficient.** GPU utilization is a poor measure
@@ -124,15 +155,27 @@ monitoring gap into a claim about efficiency.
 
 ## Install
 
+From source — works today, needs Go 1.24+:
+
 ```console
-go install github.com/ullage-project/ullage/cmd/ullage@latest
+git clone https://github.com/ullage-project/ullage && cd ullage
+make install          # builds ./bin/ullage and copies it to $GOBIN
 ```
 
-Or as a container — 16MB, distroless, non-root, runs with a read-only root
-filesystem:
+Or build the container — 16MB, distroless, non-root, runs with a read-only root
+filesystem and no capabilities:
 
 ```console
+make image
+docker run --rm ullage:dev demo
+```
+
+Once `v0.1.0` is tagged, these will also work, and this note will go away:
+
+```console
+go install github.com/ullage-project/ullage/cmd/ullage@latest
 docker run --rm ghcr.io/ullage-project/ullage:v0.1.0 demo
+kubectl krew install ullage && kubectl ullage demo
 ```
 
 ## Run it on a schedule
@@ -151,16 +194,6 @@ The CronJob runs weekly, not hourly, and that is deliberate: `ullage` measures a
 two-week window and reports capacity that has been fallow for days. Running it
 sixty times to produce the same six findings is how a tool becomes background
 noise.
-
-## Try it without a cluster
-
-```console
-ullage demo
-```
-
-Runs a complete scan against a built-in fake cluster served over real HTTP —
-same clients, same queries, same code path. No credentials, no GPUs, no
-Prometheus. Use `ullage demo --serve` to point your own tooling at it.
 
 ## Use it for real
 
@@ -342,11 +375,68 @@ source is printed under every figure. Rates are never blended across models: an
 H100 and a T4 differ roughly tenfold, so a single averaged rate is a fabricated
 number wearing a decimal point.
 
+## Developing
+
+`ullage` depends on one third-party Go module ([`yaml.v3`](https://gopkg.in/yaml.v3)).
+There is no client-go, no controller-runtime, and no vendored Kubernetes tree —
+it speaks to the API server over plain HTTP with the types it needs. A clone
+builds in a few seconds and the test suite runs without a cluster.
+
+```console
+make check        # fmt, vet, and the full race-enabled test suite
+make cover        # the same, with a coverage summary per package
+make demo         # the transcript at the top of this file
+```
+
+### Testing against a real cluster
+
+Everything above runs against in-memory fakes. `e2e/kind.sh` runs the whole
+thing against a genuine Kubernetes cluster instead — a three-node
+[kind](https://kind.sigs.k8s.io) cluster with fake accelerator capacity, a real
+Prometheus, and a synthetic exporter that reports one busy pod and one idle one:
+
+```console
+make e2e-kind          # create, deploy, scan, assert; ~3 minutes
+./e2e/kind.sh scan     # re-run just the scan against a cluster already up
+./e2e/kind.sh rbac     # run ullage in-cluster with only deploy/rbac.yaml
+make e2e-kind-down     # delete it
+```
+
+It asserts on behaviour, not on output: the idle pod must be reported, the busy
+pod must **not** be, the accelerator census must reconcile, and the idle finding
+must be attributed to exactly one device.
+
+`./e2e/kind.sh rbac` is worth calling out. It builds the image, applies
+[`deploy/rbac.yaml`](deploy/rbac.yaml), and runs a scan inside the cluster as
+that ServiceAccount and nothing else. Developer kubeconfigs are usually
+cluster-admin, so a check that starts reading a new resource passes every other
+test and then fails only for the people who installed the published manifest.
+This is the test that catches it.
+
+The script waits for real sample coverage rather than sleeping, so it is
+deterministic on a slow machine. It needs `kind`, `kubectl`, `docker` and
+`python3`.
+
 ## Status
 
 v0.1, and honest about it. The claims are deliberately narrow, the exclusions
-are deliberately loud, and the fixes are deliberately conservative. Issues and
-checks welcome.
+are deliberately loud, and the fixes are deliberately conservative.
+
+The JSON document described under [Output](#output) is a contract:
+`pkg/ullage/api` round-trips it, and a test compares re-marshalled bytes so a
+field cannot quietly disappear. Fields may be added within v0.x; existing ones
+will not change meaning without a major version. Checks currently live under
+`internal/`, which is deliberate — publishing a plugin ABI before a third check
+has taught us its shape would freeze the wrong shape. See
+[ROADMAP.md](ROADMAP.md).
+
+Issues and checks welcome; start with [CONTRIBUTING.md](CONTRIBUTING.md).
+
+---
+
+*Ullage* (n., /ˈʌlɪdʒ/) — the amount by which a container falls short of being
+full. It is what a shipper calls the space in a cask that was supposed to hold
+wine: capacity bought, shipped, and never filled.
 
 ## Licence
 

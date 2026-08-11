@@ -228,3 +228,63 @@ func fullyPopulatedResult() Result {
 		Warnings: []string{"no cluster-autoscaler status ConfigMap was readable"},
 	}
 }
+
+// A consumer that must distinguish "no capacity is held by design" from "we did
+// not evaluate whether any is" cannot do it if the first serializes as null.
+// This applies to a zero Result, which is the shape a code path that returns
+// early produces -- the one most likely to regress.
+func TestListsAreNeverNull(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		r    Result
+	}{
+		{"zero value", Result{}},
+		{"explicitly nil lists", Result{
+			APIVersion:      "ullage.dev/v1alpha1",
+			Recommendations: nil, ByDesign: nil, Suppressed: nil,
+			NotAnalyzed: nil, Warnings: nil,
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, err := json.Marshal(tc.r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got map[string]json.RawMessage
+			if err := json.Unmarshal(b, &got); err != nil {
+				t.Fatal(err)
+			}
+			for _, k := range []string{"recommendations", "byDesign", "suppressed", "notAnalyzed", "warnings"} {
+				v, ok := got[k]
+				if !ok {
+					t.Errorf("%q is missing; it must always be present", k)
+					continue
+				}
+				if string(v) == "null" {
+					t.Errorf("%q serialized as null; it must be [] when empty", k)
+				}
+			}
+			// The optional members must stay genuinely optional, so that
+			// absence keeps meaning "not applicable".
+			for _, k := range []string{"unmetDemand", "pricing"} {
+				if _, ok := got[k]; ok {
+					t.Errorf("%q present on an empty result; it should be omitted", k)
+				}
+			}
+		})
+	}
+}
+
+// MarshalJSON is defined on the value receiver so it applies through a pointer
+// too. If it were only on the pointer, encoding a Result value -- which is what
+// happens when one is nested in another struct -- would silently skip it.
+func TestNullPolicyAppliesThroughAPointer(t *testing.T) {
+	r := &Result{}
+	b, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(b, []byte(`"warnings":null`)) {
+		t.Error("the null policy did not apply when marshalling a *Result")
+	}
+}

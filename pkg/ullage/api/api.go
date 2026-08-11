@@ -229,15 +229,40 @@ func (w Workload) Ref() string {
 // Evidence is the audit trail. A recommendation that cannot be checked will not
 // be believed, so every number a finding asserts is reproducible from here.
 type Evidence struct {
-	Window                 ISODuration `json:"window"`
-	FallowDuration         ISODuration `json:"fallowDuration"`
-	LastNonZeroUtilization *time.Time  `json:"lastNonZeroUtilization,omitempty"`
-	UtilizationMax         float64     `json:"utilizationMax"`
-	PowerDrawWatts         float64     `json:"powerDrawWatts,omitempty"`
-	PowerDrawTDPRatio      float64     `json:"powerDrawTDPRatio,omitempty"`
-	SampleCompleteness     float64     `json:"sampleCompleteness"`
-	Sparkline              []float64   `json:"-"`
-	Notes                  []string    `json:"notes,omitempty"`
+	// Window is the period examined; FallowDuration is how much of it the
+	// accelerator did no work for. FallowDuration is never greater than Window.
+	Window         ISODuration `json:"window"`
+	FallowDuration ISODuration `json:"fallowDuration"`
+
+	// LastNonZeroUtilization is absent when the accelerator did no work at any
+	// point in the window. Absent means "not within the window", not "never":
+	// ullage cannot see past its own window and does not claim to.
+	LastNonZeroUtilization *time.Time `json:"lastNonZeroUtilization,omitempty"`
+
+	// UtilizationMax is a percentage, 0-100, matching DCGM_FI_DEV_GPU_UTIL.
+	// It is the highest value observed, not the mean: the mean of a job that
+	// works one hour in twenty-four is 4%, which says nothing about whether the
+	// device was needed.
+	UtilizationMax float64 `json:"utilizationMax"`
+
+	// PowerDrawWatts is instantaneous draw in watts. PowerDrawTDPRatio
+	// expresses it as a fraction of the device's rated TDP, 0-1, and is absent
+	// when the TDP for that model is unknown.
+	PowerDrawWatts    float64 `json:"powerDrawWatts,omitempty"`
+	PowerDrawTDPRatio float64 `json:"powerDrawTDPRatio,omitempty"`
+
+	// SampleCompleteness is a fraction, 0-1: the share of the samples the
+	// window should have contained that were actually present. Below the
+	// confidence floor ullage reports lower confidence rather than treating
+	// missing samples as zeroes, because a dead exporter and an idle fleet
+	// produce the same absence.
+	SampleCompleteness float64 `json:"sampleCompleteness"`
+
+	// Sparkline is for terminal rendering and is deliberately not serialized;
+	// consumers should derive their own shape from their own query.
+	Sparkline []float64 `json:"-"`
+
+	Notes []string `json:"notes,omitempty"`
 }
 
 // Impact is measured, never judged. GPUHoursFallow is what the device did not
@@ -448,16 +473,58 @@ type ScanMeta struct {
 
 // Result is the whole output of one scan.
 type Result struct {
-	APIVersion      string       `json:"apiVersion"`
-	Scan            ScanMeta     `json:"scan"`
-	Recommendations []Finding    `json:"recommendations"`
-	ByDesign        []Finding    `json:"byDesign,omitempty"`
-	Suppressed      []Finding    `json:"suppressed"`
-	BelowThreshold  int          `json:"belowThreshold"`
-	NotAnalyzed     []Exclusion  `json:"notAnalyzed"`
-	UnmetDemand     *UnmetDemand `json:"unmetDemand,omitempty"`
-	Pricing         *Pricing     `json:"pricing,omitempty"`
-	Warnings        []string     `json:"warnings"`
+	APIVersion string   `json:"apiVersion"`
+	Scan       ScanMeta `json:"scan"`
+
+	// The four finding lists are always present, and empty rather than null
+	// when nothing qualified. "No capacity is held by design" and "we did not
+	// evaluate whether any is" are different claims, and a consumer that has to
+	// tell them apart from a missing key will get it wrong. Anything genuinely
+	// optional below is a pointer, so absence is unambiguous.
+	Recommendations []Finding   `json:"recommendations"`
+	ByDesign        []Finding   `json:"byDesign"`
+	Suppressed      []Finding   `json:"suppressed"`
+	NotAnalyzed     []Exclusion `json:"notAnalyzed"`
+	Warnings        []string    `json:"warnings"`
+
+	BelowThreshold int `json:"belowThreshold"`
+
+	// UnmetDemand is absent when nothing was pending. Pricing is absent when
+	// costing was disabled or no price was known, which is why every monetary
+	// field elsewhere is also a pointer.
+	UnmetDemand *UnmetDemand `json:"unmetDemand,omitempty"`
+	Pricing     *Pricing     `json:"pricing,omitempty"`
+}
+
+// Normalize replaces nil slices with empty ones so the document matches the
+// null policy above. Encoding a nil slice yields null, which is easy to
+// introduce by adding a code path that never appends.
+func (r *Result) Normalize() {
+	if r.Recommendations == nil {
+		r.Recommendations = []Finding{}
+	}
+	if r.ByDesign == nil {
+		r.ByDesign = []Finding{}
+	}
+	if r.Suppressed == nil {
+		r.Suppressed = []Finding{}
+	}
+	if r.NotAnalyzed == nil {
+		r.NotAnalyzed = []Exclusion{}
+	}
+	if r.Warnings == nil {
+		r.Warnings = []string{}
+	}
+	if r.Scan.Params.Checks == nil {
+		r.Scan.Params.Checks = []string{}
+	}
+}
+
+// MarshalJSON guarantees the null policy regardless of how the value was built.
+func (r Result) MarshalJSON() ([]byte, error) {
+	type alias Result
+	r.Normalize()
+	return json.Marshal(alias(r))
 }
 
 // FallowPercent is the share of paid device-time that did no work.
