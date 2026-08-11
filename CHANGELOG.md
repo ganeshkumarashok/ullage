@@ -374,3 +374,37 @@ and null-policy tests.
 Push to GitHub and let the release workflow build the tag. Submit `.krew.yaml`
 to krew-index once the release artifacts exist. `internal/scan` and
 `internal/kube` remain the thinnest-covered packages.
+
+## Examples
+
+### Goal
+
+Answer "is the value easy to see, and easy to run" — which it was not.
+
+### Important findings
+
+`make demo` showed the output but not the argument. The interesting part of this
+tool is what it *refuses* to claim — reserved capacity is not waste, a
+time-sliced device cannot be judged, deleting a controller-owned pod frees
+nothing — and none of that is legible from one screen. `make tour` now walks it.
+
+There was no answer to "what would I do with this on Monday". Two runnable
+examples now exist: a CI gate that fails on a budget rather than on any finding
+at all, and a digest grouped by owner.
+
+Writing them found a real bug: three check summaries interpolated a count into a
+hard-coded plural — "1 accelerators held with no work" — despite
+`humanize.Plural` already existing. The regression test matches the pattern in
+the source rather than the rendered string, and immediately found a fourth
+instance missed by hand.
+
+### Files changed
+
+`examples/{README.md,tour.sh,ci-gate.sh,weekly-digest.sh}`,
+`internal/check/{idlepod,stuckpod,unusednode}.go` (pluralization),
+`internal/check/check_test.go`, `Makefile` (`tour`, examples in `smoke`),
+`.github/workflows/ci.yaml`, `README.md`, `cmd/ullage/docs_test.go`.
+
+### Next
+
+Push and let the release workflow build the tag.
