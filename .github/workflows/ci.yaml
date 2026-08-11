@@ -46,7 +46,39 @@ jobs:
           assert s["acceleratorsAnalyzed"] + excluded == s["acceleratorsObserved"], (
               f'{s["acceleratorsAnalyzed"]} + {excluded} != {s["acceleratorsObserved"]}')
           assert r["recommendations"], "the demo must produce findings"
+          # A list field that serialises as null breaks every consumer that
+          # iterates it, and does so only on clusters healthy enough to have
+          # none -- so it never shows up in a demo unless asserted here.
+          for k in ("recommendations", "suppressed", "notAnalyzed", "warnings"):
+              assert r.get(k) is not None, f"{k} serialised as null, not []"
           print(f'{len(r["recommendations"])} findings, contract ok')
+          PY
+
+      # The suppression loop was once broken end to end: `ignore` wrote a file
+      # nothing read, and `explain` printed the command with an argument that
+      # could never match. Every piece had a passing unit test. Only walking the
+      # path a user walks catches that, so CI walks it.
+      - name: suppressions round-trip
+        run: |
+          set -eux
+          go build -o /tmp/ullage ./cmd/ullage
+          cd "$(mktemp -d)"
+
+          # Take the command the tool itself prints, verbatim.
+          cmd=$(/tmp/ullage explain research/jupyter-alice --demo --quiet \
+                | grep -o 'ullage ignore [^ ]*')
+          id=${cmd##* }
+          /tmp/ullage ignore "$id" --reason "ci round-trip"
+
+          /tmp/ullage demo --output json --quiet --exit-zero > after.json
+          python3 - <<PY
+          import json
+          r = json.load(open("after.json"))
+          ids = [f["id"] for f in r["recommendations"]]
+          assert "$id" not in ids, "the suppression the tool told us to write did nothing"
+          assert [f["id"] for f in r["suppressed"]] == ["$id"], r["suppressed"]
+          assert not [w for w in r["warnings"] if "matched nothing" in w], r["warnings"]
+          print("suppression round-trip ok")
           PY
 
   image:
