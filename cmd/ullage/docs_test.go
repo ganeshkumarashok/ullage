@@ -21,6 +21,8 @@ var docFiles = []string{
 	"../../README.md",
 	"../../CONTRIBUTING.md",
 	"../../deploy/cronjob.yaml",
+	"../../examples/README.md",
+	"../../e2e/README.md",
 }
 
 // Matches an invocation wherever it appears -- shell block, prose backticks, or

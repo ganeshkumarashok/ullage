@@ -182,8 +182,9 @@ func (c IdlePod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Ra
 			Fallow:     g.fallow,
 			Confidence: conf,
 			Evidence:   ev,
-			Summary: fmt.Sprintf("%d accelerators held with no work for %s",
-				len(g.devices), humanize.Duration(g.fallow)),
+			Summary: fmt.Sprintf("%d %s held with no work for %s",
+				len(g.devices), humanize.Plural(len(g.devices), "accelerator"),
+				humanize.Duration(g.fallow)),
 		})
 	}
 	return out, nil

@@ -327,8 +327,9 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 				Notes:              notes,
 			},
 			Blockers: dedupeBlockers(agg.blockers),
-			Summary: fmt.Sprintf("%d accelerators on pool/%s have had no workload scheduled for %s",
-				agg.devices, pool, humanize.Duration(fallow)),
+			Summary: fmt.Sprintf("%d %s on pool/%s have had no workload scheduled for %s",
+				agg.devices, humanize.Plural(agg.devices, "accelerator"),
+				pool, humanize.Duration(fallow)),
 		}
 
 		// A deliberate floor is capacity doing its job. Reporting it as waste,
@@ -341,11 +342,12 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 				"pool/%s is %s, so these nodes are kept on purpose. ullage cannot tell whether "+
 					"that reservation is still needed — this is shown so the decision stays "+
 					"visible, not because it is wrong.", pool, reason)
-			f.Summary = fmt.Sprintf("%d accelerators on pool/%s are held empty deliberately",
-				agg.devices, pool)
+			f.Summary = fmt.Sprintf("%d %s on pool/%s are held empty deliberately",
+				agg.devices, humanize.Plural(agg.devices, "accelerator"), pool)
 		} else if len(f.Blockers) > 0 {
 			f.Evidence.Notes = append(f.Evidence.Notes, fmt.Sprintf(
-				"%d pods prevent the autoscaler from draining these nodes", len(f.Blockers)))
+				"%d %s prevent the autoscaler from draining these nodes",
+				len(f.Blockers), humanize.Plural(len(f.Blockers), "pod")))
 		} else if cl.Autoscaler.Reclaims() {
 			// Karpenter has no minimum size to rule out. An empty node it has
 			// not consolidated is a stronger finding, not a weaker one.

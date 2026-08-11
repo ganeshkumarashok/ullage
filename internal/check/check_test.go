@@ -2,6 +2,10 @@ package check_test
 
 import (
 	"context"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -1009,5 +1013,36 @@ func TestReportedCoverageIsTheCoverageThatWasJudged(t *testing.T) {
 	if c := got[0].Evidence.SampleCompleteness; c < 0.8 {
 		t.Fatalf("evidence reports %.3f coverage on a finding that passed an 80%% gate; "+
 			"the number shown must be the number judged", c)
+	}
+}
+
+// Summaries are the one sentence most people read about a finding, and three
+// of them interpolated a count straight into a hard-coded plural noun -- "1
+// accelerators held with no work". A helper for this already existed; the
+// summaries just did not use it.
+//
+// This matches the pattern in the source rather than the rendered output, so a
+// check added later is covered without anyone remembering to write a fixture
+// that happens to produce a count of one.
+func TestSummariesAgreeInNumber(t *testing.T) {
+	pattern := regexp.MustCompile(`"[^"]*%d (accelerators|pods|nodes|devices)\b[^"]*"`)
+
+	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") ||
+			strings.HasSuffix(path, "_test.go") {
+			return err
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, m := range pattern.FindAllString(string(src), -1) {
+			t.Errorf("%s: %s pairs %%d with a fixed plural; use humanize.Plural",
+				filepath.Base(path), m)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

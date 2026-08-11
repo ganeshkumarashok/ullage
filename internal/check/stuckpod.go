@@ -141,8 +141,9 @@ func (StuckPod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Raw
 				SampleCompleteness: 1,
 				Notes:              notes,
 			},
-			Summary: fmt.Sprintf("%d accelerators held for %s while %s",
-				g.devices, humanize.Duration(held), g.reason),
+			Summary: fmt.Sprintf("%d %s held for %s while %s",
+				g.devices, humanize.Plural(g.devices, "accelerator"),
+				humanize.Duration(held), g.reason),
 		})
 		// Device count travels through the subject's pods; record it so the
 		// pipeline does not have to re-derive it for pods whose devices the

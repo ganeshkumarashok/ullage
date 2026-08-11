@@ -86,6 +86,19 @@ Every number above is computed, not canned. The fake cluster it reads is a
 real API server and a real Prometheus, both served from memory, so the demo
 exercises the same code a real scan does.
 
+For the two-minute version of the whole idea — including what the tool
+deliberately refuses to claim, and why that is the interesting part:
+
+```console
+$ make tour
+```
+
+Then there are runnable [examples](examples/): a
+[CI gate](examples/ci-gate.sh) that fails a build on waste above a budget, and a
+[weekly digest](examples/weekly-digest.sh) that turns a scan into a report
+grouped by owner. Both default to the demo cluster, so you can see exactly what
+they do before pointing them at anything real.
+
 ## Why another tool
 
 Every GPU dashboard can already show you a utilization graph. None of them
@@ -386,7 +399,11 @@ builds in a few seconds and the test suite runs without a cluster.
 make check        # fmt, vet, and the full race-enabled test suite
 make cover        # the same, with a coverage summary per package
 make demo         # the transcript at the top of this file
+make tour         # the narrated walkthrough
 ```
+
+The example scripts are exercised by `make check` too, so a change that breaks
+one is caught before it is documented as working.
 
 ### Testing against a real cluster
 

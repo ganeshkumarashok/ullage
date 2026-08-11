@@ -73,6 +73,25 @@ jobs:
 
       # The suppression loop was once broken end to end: `ignore` wrote a file
       # nothing read, and `explain` printed the command with an argument that
+      # The examples are the shortest path from "what is this" to "I can see
+      # the value", which makes a broken one expensive: it fails for someone
+      # who has not yet decided the tool is worth debugging. jq and shellcheck
+      # are preinstalled on the GitHub-hosted runners.
+      - name: the example scripts run
+        run: |
+          set -eux
+          make build
+          for f in examples/*.sh e2e/kind.sh; do bash -n "$f"; done
+          shellcheck -S warning examples/*.sh e2e/*.sh
+          PAUSE=0 NO_COLOR=1 ./examples/tour.sh > /dev/null
+          ./examples/weekly-digest.sh > /dev/null
+          # The gate has to be able to both pass and fail; one that can only
+          # ever do one of them is not a gate.
+          BUDGET_USD=999999 ./examples/ci-gate.sh > /dev/null
+          if BUDGET_USD=1 ./examples/ci-gate.sh > /dev/null 2>&1; then
+            echo "the gate passed a \$1 budget against \$10k of waste"; exit 1
+          fi
+
       # could never match. Every piece had a passing unit test. Only walking the
       # path a user walks catches that, so CI walks it.
       - name: suppressions round-trip

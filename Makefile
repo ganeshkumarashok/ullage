@@ -26,6 +26,10 @@ help: ## Show this help
 demo: build ## See what ullage does, with no cluster and no GPU
 	$(BIN) demo
 
+.PHONY: tour
+tour: build ## A narrated two-minute walkthrough of the whole idea
+	@ULLAGE=$(BIN) ./examples/tour.sh
+
 ##@ Build
 
 .PHONY: build
@@ -100,6 +104,23 @@ excl=sum(e["accelerators"] for e in r["notAnalyzed"]); \
 assert s["acceleratorsAnalyzed"]+excl==s["acceleratorsObserved"], "census does not reconcile"; \
 assert r["recommendations"], "no findings"; \
 print("  contract ok, %d findings" % len(r["recommendations"]))'
+	@echo "==> the example scripts run"
+	@for f in examples/*.sh e2e/kind.sh; do bash -n "$$f" || exit 1; done
+	@if command -v shellcheck >/dev/null; then \
+		shellcheck -S warning examples/*.sh e2e/*.sh \
+			|| { echo "shellcheck found problems"; exit 1; }; \
+	fi
+	@PAUSE=0 NO_COLOR=1 ULLAGE=$(BIN) ./examples/tour.sh >/dev/null \
+		|| { echo "examples/tour.sh failed"; exit 1; }
+	@if command -v jq >/dev/null; then \
+		ULLAGE=$(BIN) ./examples/weekly-digest.sh >/dev/null \
+			|| { echo "examples/weekly-digest.sh failed"; exit 1; }; \
+		ULLAGE=$(BIN) BUDGET_USD=999999 ./examples/ci-gate.sh >/dev/null \
+			|| { echo "examples/ci-gate.sh should pass under a huge budget"; exit 1; }; \
+		ULLAGE=$(BIN) BUDGET_USD=1 ./examples/ci-gate.sh >/dev/null 2>&1 \
+			&& { echo "examples/ci-gate.sh should fail under a \$$1 budget"; exit 1; }; \
+		echo "  examples ok"; \
+	else echo "  jq absent, skipped the two JSON examples"; fi
 	@echo "all smoke checks passed"
 
 .PHONY: check
