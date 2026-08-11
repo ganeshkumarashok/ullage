@@ -467,3 +467,131 @@ Both branches were proven by breaking them.
 
 Push, and let the release workflow build the tag so the install commands and the
 CI badge stop being promises.
+
+## Independent review round — four reviewers, everything that fails open
+
+### Goal
+
+Four reviewers read the whole repository independently — API surface, domain
+correctness, adoption, and the release path — with no shared context and no
+brief beyond "find what is wrong". Two of them concluded the tag should not be
+published. This round is their criticals.
+
+The pattern behind almost all of them is one mistake made in nine places: when
+ullage could not see something, it behaved as though there were nothing to see.
+Every one of those produced a *confident* recommendation, because absence of
+evidence entered the pipeline as evidence of absence.
+
+### Recommendations that would have destroyed running work
+
+- **A DRA pod's ResourceClaim was read with `claims, _ :=`.** Under Dynamic
+  Resource Allocation a pod requests no extended resource, so the claim is the
+  only record that it is sitting on hardware. A 403 from an un-updated RBAC role
+  made an occupied node look empty and `unused-node` offered to delete a pool
+  that was training a model. Nodes hosting DRA-declaring pods are now marked
+  `OccupancyUnknown` and skipped; the blast radius is exact because pod specs
+  stay readable.
+- **PodDisruptionBudgets failed open three ways.** Expression-only selectors
+  (`app in (...)`) returned "no match", so every such budget was ignored; `{}`
+  returned "no match" though Kubernetes documents it as matching every pod in
+  the namespace — and the test asserting this stated the *correct* semantics in
+  its own failure message; and `pdbs, _ :=` turned an unreadable list into an
+  empty one. All four operators are now implemented, and an unreadable list is
+  uncertainty rather than permission.
+- **A zero SM gauge is not an idle GPU.** `DCGM_FI_DEV_GPU_UTIL` reports SM
+  activity alone. A video pipeline on NVENC/NVDEC, a data loader saturating the
+  copy engines, or a warm model resident in framebuffer all read exactly zero
+  across a fortnight while being continuously and expensively busy — and ullage
+  would have printed `kubectl scale --replicas=0` at them with high confidence.
+  ENC, DEC, MEM_COPY and FB_USED are now consulted; all four are in
+  dcgm-exporter's default counter set. An exporter that exports none of them
+  disqualifies nothing, but the scan says so, because "no GPU work" from a tool
+  that only looked at the SMs is a weaker claim.
+- **A partially-scanned window read as a fortnight of idleness.** The earlier
+  completeness cap was applied to `Stats.Completeness`, which `unused-node`
+  reads — but `idle-pod` reads `CoverageOver`, which counted only samples. The
+  protection covered the check that resizes a pool and missed the one that
+  prints `kubectl scale --replicas=0`.
+- **An autoscaler floor exempted the whole pool.** `Held(pool)` was a yes/no, so
+  a 20-node pool with a floor of 2 filed all 18 idle nodes as by-design and hid
+  the most expensive waste in the cluster. The floor is now a quantity, spent on
+  working nodes first.
+
+### The number on the front page was wrong
+
+Fallow duration is the longest across a group; accelerator-hours were that
+maximum multiplied by every device in the group. One accelerator idle a
+fortnight beside nine idle four days is 50 device-days — ullage reported 140.
+
+It is the only ranking signal and the only input to the price, so the
+overstatement promoted the wrong work to the top of the report and inflated the
+cluster total the tool exists to state, in the direction that flatters the tool.
+All three reviewers found it independently. Checks now carry a summed per-device
+total, and a finding narrowed by an autoscaler floor re-adds only the nodes it
+kept.
+
+### Things that simply did not work
+
+- **`--insecure-skip-tls-verify` never reached Prometheus.** Parsed, carried
+  through the config, stored on the client, and then ignored: the client kept
+  the default transport. Self-signed certificates are the norm for in-cluster
+  monitoring, so this was the first thing that happened to anyone pointing
+  ullage at their own Prometheus, and it looked like a bug rather than an
+  unimplemented flag.
+- **The example scripts were broken in the only mode anyone would run them in.**
+  `${PROMETHEUS:+--prometheus "$P"} ${PROMETHEUS:-demo}` expands to
+  `--prometheus URL URL`; Go's flag package stops at the stray positional, so
+  `--output json` vanished and `jq` was fed human-readable text. Demo mode — the
+  mode we tested — was fine. The CI gate also treated unpriced findings as $0,
+  so a cluster with no pricing data always passed.
+- **Krew could not install the release.** The manifest asked for
+  `ullage_linux_amd64.tar.gz`; the workflow uploads
+  `ullage_v0.1.0_linux_amd64.tar.gz`. The sha256 fields were placeholders that
+  nothing filled. The manifest is now rendered from `checksums.txt` at release
+  time and fails on a missing digest or a surviving placeholder, and a second
+  step diffs its URLs against what was actually uploaded.
+- **Suspending a CronJob frees nothing now.** It stops the next run; the Job
+  already running keeps its accelerators, and that is the run the finding is
+  about. Someone would run the command, watch the GPUs stay pinned, and conclude
+  the tool does not work. Fixes now carry `fix.frees`.
+- **The discovery cache was a package-level map with no lock.** Owner resolution
+  walks ownerReferences concurrently, so the Go runtime killed the process with
+  "concurrent map writes" on clusters with enough CRDs. Package scope was wrong
+  on its own: two clients in one process answered each other's discovery.
+
+### Failed attempts
+
+Every fix in this round was proven by mutation — break the fix, confirm the test
+fails — and that repeatedly failed in two ways worth recording.
+
+The mutation must still *compile*. Removing a value left a variable unused, and
+the "passing" test was a build failure wearing a green tick. Mutate a function
+body (`case true:`, `&& false`) rather than deleting code.
+
+The mutation must exercise the intended path. Several first attempts changed
+code the test never reached; the only reliable check is to `grep` that the
+mutation applied and read the raw failure text.
+
+Fixtures were the other repeated cost. A stub `ullage` needs a complete `scan`
+header or `jq` divides by null and exits 5. A DRA fixture pod without an
+`ownerReference` short-circuits on "not managed by a controller" long before the
+budget check it was written to exercise. A test asserting the idle-pod grouping
+arithmetic silently proved nothing until its durations cleared the 72h
+threshold.
+
+The release workflow was simulated locally end-to-end — four real tarballs, the
+extracted workflow steps, digests compared — because a release path that has
+never run is not a release path.
+
+### Verification
+
+`go test -race ./...` green after every commit; `make check` green; two new
+fail-closed test files (`internal/scan/dra_test.go`, `internal/kube/selector_test.go`)
+and four covering the arithmetic and the flags. The pre-existing suite passed
+unchanged through the autoscaler-floor fix, which is how we know nothing had
+covered it.
+
+### Next
+
+Re-run the kind E2E — the kube and scan paths moved materially — re-tag from a
+clean tree, and push so CI and the release workflow run for the first time.
