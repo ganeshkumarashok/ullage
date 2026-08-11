@@ -1,0 +1,62 @@
+# A weekly scan that writes its result to stdout as JSON.
+#
+# Weekly, not hourly, and this is deliberate. ullage measures a two-week window
+# and reports capacity that has been fallow for days; running it every hour
+# produces the same findings sixty times over and trains everyone to ignore it.
+# The failure mode of this category of tool is not missing a finding, it is
+# becoming background noise.
+#
+# Apply deploy/rbac.yaml first.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ullage
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ullage
+  namespace: ullage
+spec:
+  schedule: "0 8 * * 1"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 4
+  failedJobsHistoryLimit: 4
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          serviceAccountName: ullage
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: ullage
+              image: ghcr.io/ullage-project/ullage:v0.1.0
+              args:
+                - scan
+                - --output=json
+                # A finding is not a failure. Exit code 1 on findings is useful
+                # in CI, where you asked a question and want an answer; in a
+                # CronJob it turns every successful scan that found something
+                # into a Job failure and a pager-adjacent alert. If you want
+                # the exit code, remove this and set backoffLimit: 0.
+                - --exit-zero
+              env:
+                - name: ULLAGE_PROMETHEUS
+                  value: http://prometheus-operated.monitoring.svc:9090
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  memory: 512Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]

@@ -75,14 +75,15 @@ func Scan(ctx context.Context, opts Options) (*api.Result, error) {
 		return nil, err
 	}
 	pc := promql.New(promql.Config{
-		URL:      opts.Prometheus.URL,
-		Auth:     opts.Prometheus.Auth,
-		Token:    opts.Prometheus.Token,
-		Username: opts.Prometheus.Username,
-		Password: opts.Prometheus.Password,
-		Headers:  opts.Prometheus.Headers,
-		Timeout:  opts.Prometheus.Timeout,
-		Insecure: opts.Prometheus.Insecure,
+		URL:       opts.Prometheus.URL,
+		Auth:      opts.Prometheus.Auth,
+		Token:     opts.Prometheus.Token,
+		TokenFile: opts.Prometheus.TokenFile,
+		Username:  opts.Prometheus.Username,
+		Password:  opts.Prometheus.Password,
+		Headers:   opts.Prometheus.Headers,
+		Timeout:   opts.Prometheus.Timeout,
+		Insecure:  opts.Prometheus.Insecure,
 	})
 
 	// Credentials are verified before the scan so a bad token surfaces in about

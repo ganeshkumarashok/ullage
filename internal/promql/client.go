@@ -21,18 +21,31 @@ import (
 )
 
 // Auth modes.
+//
+// There is deliberately no "azure-monitor" or "aws-sigv4" mode. Managed
+// Prometheus offerings need real credential acquisition — AAD token exchange,
+// SigV4 request signing — and a mode that named the provider while only setting
+// a static bearer header would be worse than no mode at all: it would advertise
+// support that does not exist and fail at the point where someone had already
+// committed to the tool. Point ullage at a signing proxy instead, or supply the
+// token yourself with --prometheus-token-file, which is re-read on every
+// request so a rotating projected ServiceAccount token keeps working.
 const (
 	AuthNone   = "none"
 	AuthBearer = "bearer"
 	AuthBasic  = "basic"
-	AuthAzure  = "azure"
 )
 
 // Config describes how to reach a Prometheus-compatible query endpoint.
 type Config struct {
-	URL      string
-	Auth     string
-	Token    string
+	URL   string
+	Auth  string
+	Token string
+
+	// TokenFile is read on every request so a rotating projected
+	// ServiceAccount token keeps working through a long scan.
+	TokenFile string
+
 	Username string
 	Password string
 	Headers  map[string]string
@@ -91,9 +104,19 @@ func (c *Client) do(ctx context.Context, path string, form url.Values) (*apiResp
 	req.Header.Set("Accept", "application/json")
 
 	switch c.cfg.Auth {
-	case AuthBearer, AuthAzure:
-		if c.cfg.Token != "" {
-			req.Header.Set("Authorization", "Bearer "+c.cfg.Token)
+	case AuthBearer:
+		tok := c.cfg.Token
+		if c.cfg.TokenFile != "" {
+			// Re-read every request rather than once at startup. A projected
+			// ServiceAccount token is rotated roughly hourly, and a scan of a
+			// large cluster can outlive one; caching the first value turns a
+			// long scan into a 401 partway through.
+			if b, err := os.ReadFile(c.cfg.TokenFile); err == nil {
+				tok = strings.TrimSpace(string(b))
+			}
+		}
+		if tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
 		}
 	case AuthBasic:
 		req.SetBasicAuth(c.cfg.Username, c.cfg.Password)

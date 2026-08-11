@@ -134,7 +134,8 @@ func Doctor(ctx context.Context, opts Options) (*DoctorReport, error) {
 
 	pc := promql.New(promql.Config{
 		URL: opts.Prometheus.URL, Auth: opts.Prometheus.Auth,
-		Token: opts.Prometheus.Token, Username: opts.Prometheus.Username,
+		Token: opts.Prometheus.Token, TokenFile: opts.Prometheus.TokenFile,
+		Username: opts.Prometheus.Username,
 		Password: opts.Prometheus.Password, Headers: opts.Prometheus.Headers,
 		Timeout: opts.Prometheus.Timeout, Insecure: opts.Prometheus.Insecure,
 	})

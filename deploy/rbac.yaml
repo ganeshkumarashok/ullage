@@ -1,0 +1,101 @@
+# The complete set of permissions ullage needs, and nothing beyond it.
+#
+# Every verb here is read-only. This is not a promise about intent — the
+# Kubernetes client ullage is built on has no write methods at all, so there is
+# no code path that could use a write verb if one were granted.
+#
+# Read this before you apply it. A tool asking for cluster-wide read is asking
+# for a lot, and you should be able to see exactly what it does with it.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ullage
+  namespace: ullage
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ullage
+rules:
+  # Pods and nodes: what hardware exists and who is holding it.
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "namespaces"]
+    verbs: ["get", "list"]
+
+  # The cluster-autoscaler status ConfigMap, which is the only place a node
+  # group's deliberate minimum size is visible from inside the cluster.
+  # Namespaced to kube-system by the RoleBinding below rather than granted
+  # cluster-wide, because ConfigMaps hold configuration people assume is theirs.
+  # See the Role at the bottom of this file.
+
+  # PodDisruptionBudgets: why the autoscaler cannot drain a node.
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list"]
+
+  # Controllers, walked to find the root owner of an idle pod. Without this the
+  # recommendation is "delete this pod", which a controller undoes in seconds.
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "replicasets", "daemonsets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list"]
+
+  # Dynamic Resource Allocation. A ResourceClaim reserves whole devices and
+  # leaves no extended resource in the pod spec, so without this a node full of
+  # DRA workloads reads as empty.
+  - apiGroups: ["resource.k8s.io"]
+    resources: ["resourceclaims", "resourceclaimtemplates", "deviceclasses"]
+    verbs: ["get", "list"]
+
+  # Karpenter, which expresses "do not remove this capacity" through NodePools
+  # rather than through a minimum size.
+  - apiGroups: ["karpenter.sh"]
+    resources: ["nodepools", "nodeclaims"]
+    verbs: ["get", "list"]
+
+  # Discovery, so an owner chain ending in a CRD — a Kubeflow Notebook, a
+  # RayCluster — can be named rather than reported as an opaque UID.
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ullage
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ullage
+subjects:
+  - kind: ServiceAccount
+    name: ullage
+    namespace: ullage
+---
+# ConfigMap access is scoped to the one object that is actually needed.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ullage-autoscaler-status
+  namespace: kube-system
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["cluster-autoscaler-status"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ullage-autoscaler-status
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ullage-autoscaler-status
+subjects:
+  - kind: ServiceAccount
+    name: ullage
+    namespace: ullage

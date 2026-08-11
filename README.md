@@ -17,39 +17,62 @@ $ ullage demo
 ```
 ullage v0.1.0  prod-westus3  window 14d
 
-  6.3k of 23k accelerator-hours fallow (28%)
+  5.6k of 23k accelerator-hours fallow (25%)
   60 of 68 accelerators analysed  (8 excluded, see below)
 
-      WORKLOAD                    GPUS   ULLAGE    FOR OWNER
-  1.  pool/l4-serving                8     2.7k    14d platform
-      2 nodes, nothing scheduled · 2 pods block scale-down
-      ~$2,016  ·  8 × NVIDIA-L4
-
-  2.  research/dra-sandbox-erin      4     1.1k    11d erin@…
-      no GPU work since 31 Jul 03:00
-      ~$1,696  ·  4 × NVIDIA-L40S
-
-  3.  research/jupyter-alice         3     1.0k    14d alice@…
+      WORKLOAD                    GPUS   ULLAGE    FOR OWNER           
+  1.  research/jupyter-alice         3     1.0k    14d alice@…         
       3 pods, no GPU work since the window began · owned by StatefulSet
       ~$3,427  ·  3 × NVIDIA-A100-SXM4-80GB
 
-  ...
+  2.  pool/l4-serving                8     2.7k    14d platform        
+      2 nodes, nothing scheduled · 2 pods block scale-down
+      ~$2,016  ·  8 × NVIDIA-L4
+
+  3.  research/dra-sandbox-erin      4     1.1k    11d erin@…          
+      no GPU work since 31 Jul 04:00
+      ~$1,696  ·  4 × NVIDIA-L40S
+
+  4.  research/scratch-pod-bob       2      434     9d bob@…           
+      no GPU work since 2 Aug 04:00
+      ~$1,476  ·  2 × NVIDIA-A100-SXM4-80GB
+
+  5.  ml-platform/finetune-carol     1      336    14d ml-platform@…   
+      no GPU work since the window began · owned by Notebook (no safe automatic fix)
+      ~$1,142  ·  1 × NVIDIA-A100-SXM4-80GB
+
+  6.  serving/embed-v2               1       96     4d serving-team@…  
+      CrashLoopBackOff
+      ~$326  ·  1 × NVIDIA-A100-SXM4-80GB
 
   Fallow by design
   16 accelerators, 5.4k — held empty on purpose, not counted as waste
-    · pool/h100-reserve is held at a minimum of 2 nodes by the cluster
-      autoscaler, so these nodes are kept on purpose.
+    · pool/h100-reserve: 16 accelerators on pool/h100-reserve are held empty deliberately
+      pool/h100-reserve is held at a minimum of 2 nodes by the cluster
+      autoscaler, so these nodes are kept on purpose. ullage cannot tell whether
+      that reservation is still needed — this is shown so the decision stays
+      visible, not because it is wrong.
 
   Not analysed
-    · 2 accelerators — shared-device (t4-shared is time-slicing)
+    · 2 accelerators — shared-device
+      pool t4-shared is time-slicing, 4 replicas per device. Device-level
+      utilization reflects every co-tenant, so an idle pod sharing a device with
+      a busy one is invisible
     · 2 accelerators — mig-instance
+      pool a100-mig has MIG enabled (mixed strategy). Device-level utilization
+      is not meaningful per MIG instance
     · 4 accelerators — driver-initialising
+      pool a10-new has GPU hardware that is not yet allocatable — the driver
+      or device plugin is still starting
 
   Unmet demand
-    4 pods are waiting for 4 accelerators — 4 reported Unschedulable
+    4 pods are waiting for 4 accelerators — 4 reported Unschedulable by the scheduler
     This is context, not a finding: pending pods hold no devices.
 
-  Next: ullage explain pool/l4-serving
+  Costs use built-in list prices (approximate; override with --pricing).
+
+  Next: ullage explain research/jupyter-alice
+        shows the evidence, the owner, and the exact command to fix it
 ```
 
 ## Why another tool
@@ -105,6 +128,30 @@ monitoring gap into a claim about efficiency.
 go install github.com/ullage-project/ullage/cmd/ullage@latest
 ```
 
+Or as a container — 16MB, distroless, non-root, runs with a read-only root
+filesystem:
+
+```console
+docker run --rm ghcr.io/ullage-project/ullage:v0.1.0 demo
+```
+
+## Run it on a schedule
+
+```console
+kubectl apply -f deploy/rbac.yaml
+kubectl apply -f deploy/cronjob.yaml
+```
+
+[`deploy/rbac.yaml`](deploy/rbac.yaml) is the complete permission set, one
+`apiGroups` block at a time with a comment explaining why each is needed. Every
+verb is `get` or `list`. ConfigMap access is scoped by `resourceNames` to the
+single autoscaler status object rather than granted cluster-wide.
+
+The CronJob runs weekly, not hourly, and that is deliberate: `ullage` measures a
+two-week window and reports capacity that has been fallow for days. Running it
+sixty times to produce the same six findings is how a tool becomes background
+noise.
+
 ## Try it without a cluster
 
 ```console
@@ -142,6 +189,25 @@ schemas are detected automatically. The latter is what kube-prometheus-stack
 produces after relabelling, and assuming the former there attributes every GPU
 in the cluster to `dcgm-exporter`.
 
+### What is supported today
+
+|  | Status |
+|---|---|
+| NVIDIA, `dcgm-exporter` | Supported |
+| Exclusive whole-device allocation | Supported |
+| DRA (`resource.k8s.io`, GA in 1.34) | Supported — claims reserve whole devices, so exclusivity holds |
+| cluster-autoscaler | Supported, including a pool spread across zonal node groups |
+| Karpenter | Supported — NodePools, zero-node disruption budgets, `karpenter.sh/do-not-disrupt` |
+| Thanos, Mimir, Cortex, Grafana Agent | Should work; anything speaking the Prometheus query API |
+| MIG, time-slicing, MPS | **Counted and named, never analysed.** Device-level utilization cannot separate co-tenants |
+| AMD, Intel, Habana | **Discovered, not measured.** Their accelerators are counted and attributed, but no metric source is wired up, so they land in the exclusions |
+| Amazon Managed Prometheus, Azure Monitor, Google Managed Prometheus | **Not directly.** These need SigV4 signing or AAD token exchange. Point `ullage` at a signing proxy, or supply a token with `--prometheus-token-file`, which is re-read on every request so a rotating projected token keeps working |
+
+The fact layer is vendor-neutral by construction — checks never see a
+Kubernetes or Prometheus type — so adding AMD's `device-metrics-exporter` is a
+change to one file. Nobody has done it yet, and this table says so rather than
+letting the architecture imply a capability that does not exist.
+
 ## Output
 
 `--output json` emits a versioned, stable document (`ullage.dev/v0.1`) defined
@@ -150,7 +216,9 @@ effective thresholds, and the accelerator census, so a result can be reproduced
 and two results can be honestly compared.
 
 Exit codes: `0` nothing found, `1` findings present, `2` the scan could not
-complete. Suitable as a CI gate.
+complete. Suitable as a CI gate. Use `--exit-zero` where a finding is not a
+failure — a CronJob, for instance, where exit 1 turns every successful scan
+into a failed Job.
 
 Embed it directly:
 

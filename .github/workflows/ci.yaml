@@ -1,0 +1,59 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+
+      - run: go vet ./...
+      - run: go test -race ./...
+
+      # The demo is the product's front door, so a broken demo is a broken
+      # release. This runs the whole scan against the in-process fake cluster
+      # over real HTTP with the production clients, which makes it the closest
+      # thing to an integration test that needs no GPUs.
+      - name: demo runs end to end
+        run: go run ./cmd/ullage demo --exit-zero
+
+      - name: demo emits a valid contract
+        run: |
+          go run ./cmd/ullage demo --output json --quiet --exit-zero > result.json
+          python3 - <<'PY'
+          import json, sys
+          r = json.load(open("result.json"))
+          assert r["apiVersion"] == "ullage.dev/v0.1", r["apiVersion"]
+          s = r["scan"]
+          # Analysed plus excluded must equal observed. This is the promise the
+          # whole "honest denominators" claim rests on, so it is worth failing
+          # a build over.
+          excluded = sum(e["accelerators"] for e in r["notAnalyzed"])
+          assert s["acceleratorsAnalyzed"] + excluded == s["acceleratorsObserved"], (
+              f'{s["acceleratorsAnalyzed"]} + {excluded} != {s["acceleratorsObserved"]}')
+          assert r["recommendations"], "the demo must produce findings"
+          print(f'{len(r["recommendations"])} findings, contract ok')
+          PY
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false

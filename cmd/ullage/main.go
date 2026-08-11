@@ -44,7 +44,7 @@ Usage:
 Common flags:
   --prometheus URL       metrics endpoint (required unless --demo)
   --window DURATION      analysis window (default 14d)
-  --output FORMAT        table | json | yaml (default table)
+  --output FORMAT        table | json (default table)
   --top N                rows to show (default 10)
   --namespace NS         restrict to a namespace (repeatable)
   --checks LIST          comma-separated check IDs to run
@@ -143,6 +143,7 @@ type flags struct {
 	quiet    bool
 	explainQ bool
 	trace    bool
+	exitZero bool
 }
 
 type stringList []string
@@ -158,7 +159,7 @@ func newFlags(name string) *flags {
 	f.fs.StringVar(&f.kubeContext, "context", "", "kubeconfig context")
 	f.fs.StringVar(&f.apiServer, "api-server", "", "Kubernetes API URL, bypassing kubeconfig")
 	f.fs.StringVar(&f.promURL, "prometheus", "", "Prometheus-compatible query endpoint")
-	f.fs.StringVar(&f.promAuth, "prometheus-auth", "", "none | bearer | basic | azure-monitor")
+	f.fs.StringVar(&f.promAuth, "prometheus-auth", "", "none | bearer | basic")
 	f.fs.StringVar(&f.promToken, "prometheus-token", "", "bearer token")
 	f.fs.StringVar(&f.promTokenFile, "prometheus-token-file", "", "file containing a bearer token")
 	f.fs.StringVar(&f.promUser, "prometheus-username", "", "basic auth username")
@@ -168,7 +169,7 @@ func newFlags(name string) *flags {
 	f.fs.DurationVar(&f.timeout, "timeout", 60*time.Second, "per-query timeout")
 
 	f.fs.DurationVar(&f.window, "window", 0, "analysis window (default 336h)")
-	f.fs.DurationVar(&f.idle, "idle-threshold", 0, "minimum idle duration to report (default 72h)")
+	f.fs.DurationVar(&f.idle, "idle-threshold", 0, "minimum idle duration to report (default 24h)")
 	f.fs.DurationVar(&f.stuck, "stuck-threshold", 0, "minimum stuck duration to report (default 1h)")
 	f.fs.DurationVar(&f.step, "step", 0, "range query resolution (default 1h)")
 	f.fs.StringVar(&f.minConfidence, "min-confidence", "", "high | medium | low (default medium)")
@@ -176,14 +177,15 @@ func newFlags(name string) *flags {
 	f.fs.StringVar(&f.checks, "checks", "", "comma-separated check IDs")
 	f.fs.StringVar(&f.pricing, "pricing", "", "path to a pricing file")
 
-	f.fs.StringVar(&f.output, "output", "table", "table | json | yaml")
-	f.fs.StringVar(&f.output, "o", "table", "table | json | yaml (shorthand)")
+	f.fs.StringVar(&f.output, "output", "table", "table | json")
+	f.fs.StringVar(&f.output, "o", "table", "table | json (shorthand)")
 	f.fs.IntVar(&f.top, "top", 10, "rows to show")
 	f.fs.BoolVar(&f.noCost, "no-cost", false, "omit cost estimates")
 	f.fs.BoolVar(&f.noColor, "no-color", false, "disable colour")
 	f.fs.BoolVar(&f.quiet, "quiet", false, "suppress progress output")
 	f.fs.BoolVar(&f.explainQ, "explain-queries", false, "print the PromQL and exit")
 	f.fs.BoolVar(&f.trace, "trace", false, "record queries in the result")
+	f.fs.BoolVar(&f.exitZero, "exit-zero", false, "exit 0 even when findings exist")
 	return f
 }
 
@@ -283,8 +285,6 @@ func emit(res *api.Result, f *flags) error {
 		if err := enc.Encode(res); err != nil {
 			return err
 		}
-	case "yaml":
-		return errors.New("yaml output is not implemented in v0.1; use --output json")
 	case "table":
 		o := render.Options{
 			Version: version, Top: f.top,
@@ -301,7 +301,7 @@ func emit(res *api.Result, f *flags) error {
 	default:
 		return fmt.Errorf("unknown output format %q", f.output)
 	}
-	if n := len(res.Recommendations); n > 0 {
+	if n := len(res.Recommendations); n > 0 && !f.exitZero {
 		return &findingsError{n: n}
 	}
 	return nil
