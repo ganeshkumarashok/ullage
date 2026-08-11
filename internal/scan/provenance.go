@@ -181,10 +181,25 @@ func SynthesiseFix(prov api.Provenance, namespace string, pods []string, owner a
 		fix.Command = fmt.Sprintf("kubectl delete job -n %s %s", namespace, prov.RootName)
 
 	case prov.RootKind == "CronJob":
+		// Suspending a CronJob frees nothing now. It stops the *next* run;
+		// the Job already running keeps its accelerators until it finishes or
+		// is deleted, which is precisely the run this finding is about.
+		//
+		// Offering the patch as *the* command would have someone run it,
+		// watch the GPUs stay pinned, and conclude the tool does not work. So
+		// the suspend is offered as what it is -- the way to stop this
+		// recurring -- and the immediate reclaim is named separately, because
+		// deleting a running Job destroys in-flight work and is not a decision
+		// to bury inside a one-liner.
 		fix.Targets = api.FixTargetController
-		fix.Rationale = "A CronJob is producing these pods on a schedule; suspending it stops the next one."
+		fix.Rationale = fmt.Sprintf(
+			"CronJob %s produces these pods on a schedule. Suspending it prevents the next run "+
+				"but frees nothing now: the Job already running keeps its accelerators until it "+
+				"finishes. To reclaim the capacity immediately, delete that Job as well — which "+
+				"discards whatever work it has done so far.", prov.RootName)
 		fix.Command = fmt.Sprintf(`kubectl patch cronjob -n %s %s -p '{"spec":{"suspend":true}}'`,
 			namespace, prov.RootName)
+		fix.Frees = api.FreesLater
 
 	case prov.RootKind == "DaemonSet":
 		fix.Targets = api.FixTargetNone

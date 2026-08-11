@@ -319,7 +319,23 @@ type Fix struct {
 	Rationale                 string    `json:"rationale,omitempty"`
 	Blockers                  []Blocker `json:"blockers,omitempty"`
 	Prevention                string    `json:"prevention,omitempty"`
+
+	// Frees says when the command actually returns the capacity. Empty means
+	// immediately, which is the case for every fix except a CronJob suspend:
+	// that stops the next run and frees nothing until the Job already running
+	// finishes on its own.
+	//
+	// Automation needs to know the difference. A gate that runs the command
+	// and re-scans would otherwise report the fix as having failed.
+	Frees string `json:"frees,omitempty"`
 }
+
+// When a fix returns the capacity.
+const (
+	// FreesLater means the command prevents recurrence but does not reclaim
+	// anything from the run in progress.
+	FreesLater = "later"
+)
 
 // Blocker names something preventing the obvious remediation from working.
 type Blocker struct {

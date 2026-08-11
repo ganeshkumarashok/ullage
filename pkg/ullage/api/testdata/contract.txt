@@ -22,6 +22,7 @@ byDesign[].fix.blockers[].object string
 byDesign[].fix.blockers[].reason string
 byDesign[].fix.command string
 byDesign[].fix.confirmWith string
+byDesign[].fix.frees string
 byDesign[].fix.prevention string
 byDesign[].fix.rationale string
 byDesign[].fix.requiresHumanConfirmation boolean
@@ -85,6 +86,7 @@ recommendations[].fix.blockers[].object string
 recommendations[].fix.blockers[].reason string
 recommendations[].fix.command string
 recommendations[].fix.confirmWith string
+recommendations[].fix.frees string
 recommendations[].fix.prevention string
 recommendations[].fix.rationale string
 recommendations[].fix.requiresHumanConfirmation boolean
@@ -162,6 +164,7 @@ suppressed[].fix.blockers[].object string
 suppressed[].fix.blockers[].reason string
 suppressed[].fix.command string
 suppressed[].fix.confirmWith string
+suppressed[].fix.frees string
 suppressed[].fix.prevention string
 suppressed[].fix.rationale string
 suppressed[].fix.requiresHumanConfirmation boolean

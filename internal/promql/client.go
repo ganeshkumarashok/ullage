@@ -7,6 +7,7 @@ package promql
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -63,7 +64,24 @@ func New(cfg Config) *Client {
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 60 * time.Second
 	}
-	return &Client{cfg: cfg, http: &http.Client{Timeout: cfg.Timeout}}
+
+	// Insecure was accepted, stored, and never used: the client kept the
+	// default transport, so --insecure-skip-tls-verify silently did nothing
+	// for Prometheus and every scan against a self-signed monitoring endpoint
+	// failed with a certificate error the flag claimed to have handled.
+	//
+	// The default transport is cloned rather than replaced so that proxy
+	// settings, connection pooling and HTTP/2 keep working.
+	tr := http.DefaultTransport
+	if cfg.Insecure {
+		clone := http.DefaultTransport.(*http.Transport).Clone()
+		if clone.TLSClientConfig == nil {
+			clone.TLSClientConfig = &tls.Config{}
+		}
+		clone.TLSClientConfig.InsecureSkipVerify = true
+		tr = clone
+	}
+	return &Client{cfg: cfg, http: &http.Client{Timeout: cfg.Timeout, Transport: tr}}
 }
 
 func (c *Client) URL() string { return c.cfg.URL }
