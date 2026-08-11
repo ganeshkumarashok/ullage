@@ -50,6 +50,7 @@ func TestEveryDocumentedCommandParses(t *testing.T) {
 			}
 
 			_, rest := stripDemo(args)
+			_, rest = stripServe(rest)
 			f := newFlags("doc")
 			f.fs.SetOutput(discard{})
 			if err := f.fs.Parse(rest); err != nil {

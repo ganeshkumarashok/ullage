@@ -108,9 +108,12 @@ ullage v0.1.0  demo  window 14d
         shows the evidence, the owner, and the exact command to fix it
 ```
 
-Every number above is computed, not canned. The fake cluster it reads is a
-real API server and a real Prometheus, both served from memory, so the demo
-exercises the same code a real scan does.
+Every number above is computed, not canned. The demo runs the production
+pipeline — the same client, queries, checks and renderer — against in-memory
+HTTP servers that serve Kubernetes- and Prometheus-shaped responses. They are
+stand-ins for the real thing, not a real API server and a real Prometheus, but
+nothing between them and the output is staged. `ullage demo --serve` exposes
+those endpoints so you can point the real CLI at them and confirm that.
 
 ### Then ask why
 
@@ -205,10 +208,11 @@ the same demo cluster, and none of them touch anything real:
 
 ## Why another tool
 
-Every GPU dashboard can already show you a utilization graph. None of them
-answer the question you actually have, which is *what should I do about it.*
+Every GPU dashboard can already show you a utilization graph. A graph answers
+*what is happening*; the question you usually have is *what should I do about
+it*, and the distance between the two is a person with a spreadsheet.
 
-`ullage` is built around four things a dashboard does not do.
+`ullage` is built around four things a dashboard is not trying to do.
 
 **It finds what is blocking your autoscaler.** An empty node is visible
 anywhere. *"These two pods with `safe-to-evict: false` are why the autoscaler
@@ -239,9 +243,9 @@ monitoring gap into a claim about efficiency.
 | | what it answers | acts on the cluster |
 |---|---|---|
 | **ullage** | which accelerators were paid for and idle, whose they are, and the one command that frees them | no — read-only by construction |
-| [Robusta KRR](https://github.com/robusta-dev/krr) | what CPU/memory requests should be, from usage history | no — prints recommendations |
+| [Robusta KRR](https://github.com/robusta-dev/krr) | what CPU/memory requests should be, from usage history | not by default — an optional enforcer can apply them |
 | [OpenCost](https://www.opencost.io/) | what each workload cost, including GPU | no — allocation and showback |
-| [Kubecost](https://www.kubecost.com/) | cost allocation, with efficiency and savings reports | optional automation in the paid tiers |
+| [Kubecost](https://www.kubecost.com/) | cost allocation, with efficiency and savings reports | optionally — self-hosted Actions can resize and turn down |
 | [Cast AI](https://cast.ai/) | how to run the same workloads for less | yes — bin-packs and replaces nodes |
 | [nvidia-dcgm-exporter](https://github.com/NVIDIA/dcgm-exporter) | per-device utilization metrics | no — it is the data source ullage reads |
 
@@ -274,8 +278,11 @@ OpenCost for allocation, `ullage` for the subset that bought nothing.
   is not a fleet that went idle.
 - **It will not write to your cluster.** The Kubernetes client has no write
   methods. That is a property of the code, not a promise.
-- **It will not phone home.** There is no telemetry, no analytics, and no
-  network access beyond your API server and your Prometheus.
+- **It will not phone home.** There is no telemetry and no analytics, and
+  `ullage` itself opens no connection except to your API server and your
+  Prometheus. The one exception is not its own: if your kubeconfig uses an exec
+  credential plugin, `ullage` runs it exactly as `kubectl` would, and `az`,
+  `aws` or `gke-gcloud-auth-plugin` will talk to your identity provider.
 
 ## Install
 
@@ -283,15 +290,16 @@ From source — works today, needs Go 1.24+:
 
 ```console
 git clone https://github.com/ullage-project/ullage && cd ullage
-make install          # builds ./bin/ullage and copies it to $GOBIN
+make install          # go install into $GOBIN (use `make build` for ./bin/ullage)
 ```
 
-Or build the container — 16MB, distroless, non-root, runs with a read-only root
-filesystem and no capabilities:
+Or build the container — 16MB, distroless, and non-root (`USER 65532`). The
+supplied CronJob additionally runs it with a read-only root filesystem and every
+capability dropped:
 
 ```console
-make image
-docker run --rm ullage:dev demo
+make image     # tags ghcr.io/ullage-project/ullage:$(git describe --tags)
+docker run --rm ghcr.io/ullage-project/ullage:v0.1.0 demo
 ```
 
 Once `v0.1.0` is tagged, these will also work, and this note will go away:
@@ -316,7 +324,7 @@ single autoscaler status object rather than granted cluster-wide.
 
 The CronJob runs weekly, not hourly, and that is deliberate: `ullage` measures a
 two-week window and reports capacity that has been fallow for days. Running it
-sixty times to produce the same six findings is how a tool becomes background
+sixty times to produce the same seven findings is how a tool becomes background
 noise.
 
 ## Use it for real
@@ -355,10 +363,10 @@ in the cluster to `dcgm-exporter`.
 | DRA (`resource.k8s.io`, GA in 1.34) | Supported — claims are filtered by driver, so a NIC claim is not counted as a GPU, and a claim shared between pods is counted once |
 | cluster-autoscaler | Supported, including a pool spread across zonal node groups |
 | Karpenter | Supported — NodePools, zero-node disruption budgets, `karpenter.sh/do-not-disrupt` |
-| Thanos, Mimir, Cortex, Grafana Agent | Should work; anything speaking the Prometheus query API. If the endpoint holds more than one cluster, pass `--metrics-selector 'cluster="prod-eastus"'` — node names are not unique across clusters, and `ullage` warns rather than merging them silently |
-| MIG, time-slicing, MPS | **Counted and named, never analysed.** Device-level utilization cannot separate co-tenants. Both MIG strategies are detected, including `single`, where instances are advertised as whole `nvidia.com/gpu` |
-| AMD, Intel, Habana | **Discovered, not measured.** Their accelerators are counted and attributed, but no metric source is wired up, so they land in the exclusions |
-| Amazon Managed Prometheus, Azure Monitor, Google Managed Prometheus | **Not directly.** These need SigV4 signing or AAD token exchange. Point `ullage` at a signing proxy, or supply a token with `--prometheus-token-file`, which is re-read on every request so a rotating projected token keeps working |
+| Thanos, Mimir, Cortex | Should work; anything speaking the Prometheus query API. If the endpoint holds more than one cluster, pass `--metrics-selector 'cluster="prod-eastus"'` — node names are not unique across clusters, and `ullage` warns rather than merging them silently |
+| MIG, time-slicing, MPS | **Counted and named, never analysed per pod.** Device-level utilization cannot separate co-tenants, so shared devices are excluded from idle-pod analysis. A node where nothing at all is running is still reported, whatever its sharing mode. Both MIG strategies are detected, including `single`, where instances are advertised as whole `nvidia.com/gpu` |
+| AMD, Intel, Habana | **Discovered, not measured.** Their resource names are recognised and counted in the census of a mixed cluster, and land in the exclusions with `no metric source`. No utilization is read for them, so nothing is attributed to their owners. A cluster with no NVIDIA devices at all has no `DCGM_FI_DEV_GPU_UTIL` series and the scan stops rather than guessing |
+| Amazon Managed Prometheus, Azure Monitor, Google Managed Prometheus | **Not directly.** `ullage` implements no provider-native signing or token exchange: Amazon wants SigV4, Azure a Microsoft Entra bearer token, Google an OAuth2/ADC credential. Point `ullage` at a signing proxy, or obtain a token yourself and pass `--prometheus-auth bearer --prometheus-token-file FILE` — both flags, the file is ignored without the mode. It is re-read on every request, so a rotating projected token keeps working |
 
 The fact layer is vendor-neutral by construction — checks never see a
 Kubernetes or Prometheus type — so adding AMD's `device-metrics-exporter` is a
@@ -368,9 +376,10 @@ letting the architecture imply a capability that does not exist.
 ## Output
 
 `--output json` emits a versioned, stable document (`ullage.dev/v0.1`) defined
-in [`pkg/ullage/api`](pkg/ullage/api). It records the exact PromQL used, the
-effective thresholds, and the accelerator census, so a result can be reproduced
-and two results can be honestly compared.
+in [`pkg/ullage/api`](pkg/ullage/api). It records the effective thresholds, the
+window, and the accelerator census, so two results can be honestly compared. Add
+`--trace` and it also records every PromQL query it sent, which is what you want
+when somebody disputes a number.
 
 Exit codes: `0` nothing found, `1` findings present, `2` the scan could not
 complete. Suitable as a CI gate. Use `--exit-zero` where a finding is not a
@@ -397,9 +406,11 @@ file is the right moment to ask whether `apiVersion` should move:
 UPDATE_GOLDEN=1 go test ./pkg/ullage/api/
 ```
 
-Every list field always serialises as `[]`, never `null`. A consumer iterating
-`suppressed` or `warnings` would otherwise break on exactly the healthiest
-clusters, and never in a demo.
+The top-level result lists — `recommendations`, `byDesign`, `suppressed`,
+`notAnalyzed`, `warnings` — always serialise as `[]`, never `null`. A consumer
+iterating `suppressed` or `warnings` would otherwise break on exactly the
+healthiest clusters, and never in a demo. Optional nested lists inside a finding
+are `omitempty` and may be absent, so read those defensively.
 
 ## Checks
 
@@ -449,7 +460,7 @@ argument.
 ```console
 $ ullage explain research/jupyter-alice
 ...
-  Suppress: ullage ignore idle-pod/research/jupyter-alice --reason "..." --until 2026-05-14
+  Suppress: ullage ignore idle-pod/research/jupyter-alice --reason "..." --until 2026-11-11
 ```
 
 Which writes to `.ullage.yaml`:
@@ -458,7 +469,7 @@ Which writes to `.ullage.yaml`:
 suppress:
   - id: "idle-pod/research/jupyter-alice"
     reason: "reserved for the Q3 eval"
-    until: "2026-05-14"
+    until: "2026-11-11"
 ```
 
 Ids are slash-separated, so `*` works per segment — `unused-node/pool/*` for one
@@ -496,8 +507,10 @@ happens to have started in.
 
 Costs use built-in approximate list prices and are wrong for almost everyone —
 reservations, savings plans, spot and negotiated discounts all move them, often
-by more than half. Override with `--pricing`, or drop them with `--no-cost`. The
-source is printed under every figure. Rates are never blended across models: an
+by more than half. Override with `--pricing`, or drop them with `--no-cost`.
+Every report names the rate source it used, so a reader always knows whether the
+money came from finance or from a built-in guess. Rates are never blended
+across models: an
 H100 and a T4 differ roughly tenfold, so a single averaged rate is a fabricated
 number wearing a decimal point.
 
@@ -505,12 +518,12 @@ number wearing a decimal point.
 
 `ullage` depends on one third-party Go module ([`yaml.v3`](https://gopkg.in/yaml.v3)).
 There is no client-go, no controller-runtime, and no vendored Kubernetes tree —
-it speaks to the API server over plain HTTP with the types it needs. A clone
+it speaks to the API server over ordinary HTTP(S) with the types it needs. A clone
 builds in a few seconds and the test suite runs without a cluster.
 
 ```console
 make check        # fmt, vet, and the full race-enabled test suite
-make cover        # the same, with a coverage summary per package
+make cover        # tests with a coverage profile, then open the HTML report
 make demo         # the transcript at the top of this file
 make tour         # the narrated walkthrough
 ```
@@ -556,8 +569,9 @@ The JSON document described under [Output](#output) is a contract:
 `pkg/ullage/api` round-trips it, and a test compares re-marshalled bytes so a
 field cannot quietly disappear. Fields may be added within v0.x; existing ones
 will not change meaning without a major version. Checks currently live under
-`internal/`, which is deliberate — publishing a plugin ABI before a third check
-has taught us its shape would freeze the wrong shape. See
+`internal/`, which is deliberate — the three checks here have not yet disagreed
+with each other enough to show where the seams belong, and publishing a plugin
+ABI before they do would freeze the wrong shape. See
 [ROADMAP.md](ROADMAP.md).
 
 Issues and checks welcome; start with [CONTRIBUTING.md](CONTRIBUTING.md).

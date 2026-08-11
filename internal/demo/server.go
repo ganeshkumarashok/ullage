@@ -1,11 +1,13 @@
 // Package demo runs the real ullage pipeline against a synthetic cluster.
 //
-// The servers below speak real HTTP and serve real Kubernetes and Prometheus
-// response shapes. The scan that runs against them is the production code path
-// — the same client, the same queries, the same checks — so the demo proves the
-// pipeline works rather than illustrating what it would print. `ullage demo
-// --serve` exposes the same endpoints so anyone can point the real CLI at them
-// and confirm nothing is staged.
+// The servers below are httptest servers: they speak real HTTP and serve real
+// Kubernetes and Prometheus response shapes, but they are not a kube-apiserver
+// and not a Prometheus. What is real is everything downstream of them — the
+// same client, the same queries, the same checks, the same renderer — so the
+// demo exercises the production path rather than illustrating what it would
+// print. `ullage demo --serve` exposes these endpoints so anyone can point the
+// real CLI at them and confirm nothing between the wire and the output is
+// staged.
 package demo
 
 import (

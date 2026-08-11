@@ -502,15 +502,7 @@ func demoNow() (time.Time, error) {
 }
 
 func cmdDemo(ctx context.Context, args []string) error {
-	var serve bool
-	rest := make([]string, 0, len(args))
-	for _, a := range args {
-		if a == "--serve" || a == "-serve" {
-			serve = true
-			continue
-		}
-		rest = append(rest, a)
-	}
+	serve, rest := stripServe(args)
 
 	now, err := demoNow()
 	if err != nil {
@@ -709,13 +701,27 @@ func isFlagExpectingValue(a string) bool {
 	return true
 }
 
+// stripServe removes --serve, which cmdDemo consumes before the flag set sees
+// it. It exists as a named function rather than a loop inside cmdDemo so that
+// the documentation test can model the real parser: a flag stripped by hand in
+// one place and unknown everywhere else is a flag the docs cannot mention.
+func stripServe(args []string) (bool, []string) {
+	return stripFlag(args, "serve")
+}
+
 // stripDemo removes --demo, which is not a registered flag because it is a
 // mode rather than a value.
 func stripDemo(args []string) (bool, []string) {
+	return stripFlag(args, "demo")
+}
+
+// stripFlag removes a boolean flag in both its spellings and reports whether it
+// was present.
+func stripFlag(args []string, name string) (bool, []string) {
 	var on bool
 	rest := make([]string, 0, len(args))
 	for _, a := range args {
-		if a == "--demo" || a == "-demo" {
+		if a == "--"+name || a == "-"+name {
 			on = true
 			continue
 		}
