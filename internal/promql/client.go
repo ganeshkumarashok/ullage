@@ -226,14 +226,23 @@ func (c *Client) QueryExpr(ctx context.Context, expr string, at time.Time) ([]Ve
 	}
 	out := make([]VectorSample, 0, len(resp.Data.Result))
 	for _, r := range resp.Data.Result {
-		s := VectorSample{Labels: r.Metric, At: at}
-		if len(r.Value) == 2 {
-			ts, _ := toFloat(r.Value[0])
-			v, _ := toFloat(r.Value[1])
-			s.Value = v
-			s.At = time.Unix(int64(ts), 0).UTC()
+		if len(r.Value) != 2 {
+			continue
 		}
-		out = append(out, s)
+		ts, okT := toFloat(r.Value[0])
+		v, okV := toFloat(r.Value[1])
+		if !okT || !okV {
+			// Dropped, never defaulted. A discarded value left at the zero
+			// value is indistinguishable from a device that measurably did
+			// nothing, and this is the aggregate path — one bad value here
+			// decides a whole device.
+			continue
+		}
+		out = append(out, VectorSample{
+			Labels: r.Metric,
+			Value:  v,
+			At:     time.Unix(int64(ts), 0).UTC(),
+		})
 	}
 	return out, nil
 }
@@ -264,30 +273,56 @@ func (c *Client) Query(ctx context.Context, q string, at time.Time) ([]Series, e
 	for _, r := range resp.Data.Result {
 		s := Series{Labels: r.Metric}
 		if len(r.Value) == 2 {
-			ts, _ := toFloat(r.Value[0])
-			v, _ := toFloat(r.Value[1])
-			s.Samples = []Sample{{T: time.Unix(int64(ts), 0).UTC(), V: v}}
+			ts, okT := toFloat(r.Value[0])
+			v, okV := toFloat(r.Value[1])
+			if okT && okV {
+				s.Samples = []Sample{{T: time.Unix(int64(ts), 0).UTC(), V: v}}
+			}
 		}
 		out = append(out, s)
 	}
 	return out, nil
 }
 
+// toFloat parses a Prometheus value, rejecting anything that is not a finite
+// number.
+//
+// The rejection is the point. Prometheus serialises NaN as the string "NaN",
+// which ParseFloat accepts happily, and a NaN then behaves as a *confirmed
+// zero* everywhere downstream: `v > max` is false so it never raises the
+// maximum, `v > 0` is false so it never clears ZeroThroughout, and it still
+// counts towards sample coverage. The result is a device reported as
+// measurably idle, at full confidence, on the strength of readings that said
+// nothing at all.
+//
+// dcgm-exporter emits NaN for fields a device cannot report — which includes a
+// GPU whose driver has wedged or which is mid-reset. That is precisely the
+// hardware that must not be recommended for deletion. Dropping the sample
+// lowers completeness instead, which weakens the claim exactly as it should.
 func toFloat(v any) (float64, bool) {
+	var f float64
 	switch t := v.(type) {
 	case float64:
-		return t, true
+		f = t
 	case string:
-		f, err := strconv.ParseFloat(t, 64)
+		p, err := strconv.ParseFloat(t, 64)
 		if err != nil {
 			return 0, false
 		}
-		return f, true
+		f = p
 	case json.Number:
-		f, err := t.Float64()
-		return f, err == nil
+		p, err := t.Float64()
+		if err != nil {
+			return 0, false
+		}
+		f = p
+	default:
+		return 0, false
 	}
-	return 0, false
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0, false
+	}
+	return f, true
 }
 
 // LabelSchema records which label carries pod identity on DCGM series.

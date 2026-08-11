@@ -8,6 +8,7 @@ import (
 
 	"github.com/ullage-project/ullage/internal/check"
 	"github.com/ullage-project/ullage/internal/inventory"
+	"github.com/ullage-project/ullage/internal/scan"
 	"github.com/ullage-project/ullage/pkg/ullage/api"
 )
 
@@ -67,7 +68,7 @@ func runningPod(ns, name, node string, gpus int) inventory.PodView {
 
 func cluster(devices []inventory.Device, pods []inventory.PodView, nodes []inventory.NodeView) *inventory.Cluster {
 	return &inventory.Cluster{
-		Context: "test", Now: now, Window: window,
+		Context: "test", Now: now, Window: window, Step: scan.ScrapeInterval,
 		Devices: devices, Pods: pods, Nodes: nodes,
 		MetricsAttributed: true,
 	}
@@ -535,14 +536,21 @@ func TestUnusedNodeNeverRecommendsDeletingBusyHardware(t *testing.T) {
 		}
 		var said bool
 		for _, n := range got[0].Evidence.Notes {
-			if strings.Contains(n, "age of the") {
+			if strings.Contains(n, "not a measurement") {
 				said = true
 			}
 		}
 		if !said {
-			t.Fatal("with no metrics the duration is the node's age, and the evidence must " +
-				"say so; presenting an upper bound as an observation is the overstatement " +
-				"this tool exists to avoid")
+			t.Fatalf("with no metrics the duration is the node's age, and the evidence must "+
+				"say so; presenting an upper bound as an observation is the overstatement "+
+				"this tool exists to avoid. notes=%q", got[0].Evidence.Notes)
+		}
+		// The rendered evidence must not contradict the note it sits beside.
+		if got[0].Evidence.SampleCompleteness != 0 {
+			t.Fatalf("SampleCompleteness=%v on a node with no series at all; `explain` prints "+
+				"this as a coverage percentage, so a non-zero value here tells the reader the "+
+				"opposite of the note directly above it",
+				got[0].Evidence.SampleCompleteness)
 		}
 	})
 }
@@ -659,5 +667,208 @@ func TestAutoscalerFloorDoesNotStealAnotherPoolsNodeGroups(t *testing.T) {
 	}
 	if got, _ := a.Floor("gpu-big"); got != 4 {
 		t.Fatalf("floor for pool gpu-big is %d, want 4", got)
+	}
+}
+
+// A pool reports the longest fallow duration across its nodes, and the evidence
+// label has to describe the node that duration came from. Recording only that
+// *some* node in the pool was measured lets a well-observed node vouch for an
+// unobserved sibling's age — which republishes, at pool level, the exact
+// overstatement the per-device completeness gate was added to remove. Partial
+// dcgm-exporter coverage inside one pool is common.
+func TestOneNodesMeasurementDoesNotVouchForAnothersAge(t *testing.T) {
+	nodes := []inventory.NodeView{
+		{Name: "gpu-measured", Pool: "mixed", Accelerators: 1, Ready: true,
+			Allocation: api.AllocExclusive, Age: 100 * time.Hour},
+		// No device series at all, and much older.
+		{Name: "gpu-dark", Pool: "mixed", Accelerators: 1, Ready: true,
+			Allocation: api.AllocExclusive, Age: 480 * time.Hour},
+	}
+	devices := []inventory.Device{
+		device("gpu-measured/0", "gpu-measured", "mixed", nil, idleStats(100*time.Hour, false)),
+	}
+
+	cl := cluster(devices, nil, nodes)
+	cl.Autoscaler = &inventory.AutoscalerView{Floors: map[string]int{}}
+
+	got := find(t, check.UnusedNode{}, cl)
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want 1", len(got))
+	}
+	f := got[0]
+
+	var claimsMeasured bool
+	for _, n := range f.Evidence.Notes {
+		if strings.Contains(n, "measured on") {
+			claimsMeasured = true
+		}
+	}
+	if claimsMeasured {
+		t.Fatalf("the reported duration (%s) is gpu-dark's age — it produced no samples at "+
+			"all — yet the evidence calls it measured. notes=%q",
+			f.Fallow, f.Evidence.Notes)
+	}
+	if f.Evidence.SampleCompleteness != 0 {
+		t.Fatalf("SampleCompleteness=%v; the duration came from a node with no series",
+			f.Evidence.SampleCompleteness)
+	}
+
+	var saidUneven bool
+	for _, n := range f.Evidence.Notes {
+		if strings.Contains(n, "uneven") {
+			saidUneven = true
+		}
+	}
+	if !saidUneven {
+		t.Fatalf("a pool with one measured and one unmeasured node should say coverage is "+
+			"uneven, so the reader knows the pool was not observed uniformly. notes=%q",
+			f.Evidence.Notes)
+	}
+}
+
+// Three GPUs that produced no series at all cannot be vouched for by the
+// fourth: "no accelerator here did any work" is only a measurement if every
+// accelerator here was actually watched.
+func TestPartiallyObservedNodeDoesNotClaimAWholeNodeMeasurement(t *testing.T) {
+	nodes := []inventory.NodeView{
+		{Name: "gpu-0", Pool: "gpu", Accelerators: 4, Ready: true,
+			Allocation: api.AllocExclusive, Age: 30 * 24 * time.Hour},
+	}
+	devices := []inventory.Device{
+		device("gpu-0/0", "gpu-0", "gpu", nil, idleStats(100*time.Hour, false)),
+	}
+
+	cl := cluster(devices, nil, nodes)
+	cl.Autoscaler = &inventory.AutoscalerView{Floors: map[string]int{}}
+
+	got := find(t, check.UnusedNode{}, cl)
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want 1", len(got))
+	}
+	for _, n := range got[0].Evidence.Notes {
+		if strings.Contains(n, "measured on") {
+			t.Fatalf("1 of 4 accelerators was observed, but the finding claims the node was "+
+				"measured. notes=%q", got[0].Evidence.Notes)
+		}
+	}
+}
+
+// Under MIG the node advertises far more units than DCGM has series for, so
+// demanding parity between them would permanently deny a truthful label.
+func TestMIGNodeCanStillReportAMeasurement(t *testing.T) {
+	nodes := []inventory.NodeView{
+		{Name: "mig-0", Pool: "mig", Accelerators: 28, Ready: true,
+			Allocation: api.AllocMIG, Age: 30 * 24 * time.Hour},
+	}
+	devices := []inventory.Device{
+		device("mig-0/0", "mig-0", "mig", nil, idleStats(100*time.Hour, false)),
+	}
+	devices[0].Allocation = api.AllocMIG
+
+	cl := cluster(devices, nil, nodes)
+	cl.Autoscaler = &inventory.AutoscalerView{Floors: map[string]int{}}
+
+	got := find(t, check.UnusedNode{}, cl)
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want 1", len(got))
+	}
+	if got[0].Fallow != 100*time.Hour {
+		t.Fatalf("fallow=%s, want the measured 100h; 28 advertised MIG slices are not 28 "+
+			"cards to observe", got[0].Fallow)
+	}
+}
+
+// Coverage judged against the scan window makes the tool blind to every young
+// pod. A pod that has existed for two days of a fortnight can never exceed
+// about 14% window coverage however completely it was watched, so a fixed
+// threshold silently discards it — and "someone started an expensive pod last
+// week and forgot about it" is both the most actionable thing this tool finds
+// and the first thing anyone evaluating it will try.
+func TestYoungIdlePodIsJudgedOnItsOwnLifetime(t *testing.T) {
+	// Five days: comfortably past the 72h idle threshold, but only 36% of a
+	// fortnight — so a window-relative coverage gate of 0.80 discards it.
+	const lived = 5 * 24 * time.Hour
+
+	pod := runningPod("ml", "forgotten-notebook", "gpu-0", 1)
+	start := now.Add(-lived)
+	pod.StartTime = &start
+
+	// Fully observed for every minute it has existed, at a 30s scrape.
+	util := idleStats(lived, false)
+	util.Samples = int(lived / scan.ScrapeInterval)
+	// Its coverage of the 14-day window is only 2/14 — which is the whole
+	// point. The finding must survive that.
+	util.Completeness = float64(lived) / float64(window)
+
+	devices := []inventory.Device{
+		device("gpu-0/0", "gpu-0", "gpu", &pod.Ref, util),
+	}
+	nodes := []inventory.NodeView{
+		{Name: "gpu-0", Pool: "gpu", Accelerators: 1, Ready: true,
+			Allocation: api.AllocExclusive, Age: 30 * 24 * time.Hour},
+	}
+
+	got := find(t, check.IdlePod{}, cluster(devices, []inventory.PodView{pod}, nodes))
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want 1: a five-day-old pod, idle and fully observed for "+
+			"every minute of its life, was discarded because five days is a small fraction "+
+			"of a fortnight", len(got))
+	}
+	if got[0].Fallow > lived {
+		t.Fatalf("fallow=%s but the pod has only existed for %s; a pod cannot have been idle "+
+			"for longer than it has existed", got[0].Fallow, lived)
+	}
+}
+
+// The counterpart: a pod nobody was watching must still be refused. The
+// lifetime denominator must not become a way to launder thin evidence.
+func TestBarelyObservedPodIsStillRefused(t *testing.T) {
+	const lived = 5 * 24 * time.Hour
+
+	pod := runningPod("ml", "unwatched", "gpu-0", 1)
+	start := now.Add(-lived)
+	pod.StartTime = &start
+
+	util := idleStats(lived, false)
+	util.Samples = 3 // three readings across five days
+	util.Completeness = 1
+
+	devices := []inventory.Device{device("gpu-0/0", "gpu-0", "gpu", &pod.Ref, util)}
+	nodes := []inventory.NodeView{
+		{Name: "gpu-0", Pool: "gpu", Accelerators: 1, Ready: true,
+			Allocation: api.AllocExclusive, Age: 30 * 24 * time.Hour},
+	}
+
+	if got := find(t, check.IdlePod{}, cluster(devices, []inventory.PodView{pod}, nodes)); len(got) != 0 {
+		t.Fatalf("got %d findings, want 0: three samples across five days is not evidence that "+
+			"a GPU did nothing, and a lifetime-relative denominator must not launder it",
+			len(got))
+	}
+}
+
+// A GPU recycled from a finished job carries that job's samples on its own
+// series. The new holder must be judged on its own coverage, not on the
+// device's summed history.
+func TestPodDoesNotBorrowCoverageFromThePreviousHolder(t *testing.T) {
+	const lived = 5 * 24 * time.Hour
+
+	pod := runningPod("ml", "new-holder", "gpu-0", 1)
+	start := now.Add(-lived)
+	pod.StartTime = &start
+
+	util := idleStats(lived, false)
+	util.Samples = 2 // two readings since it took the device over: thin
+	// The physical device was watched all fortnight — by somebody else.
+	util.Completeness = 1
+
+	devices := []inventory.Device{device("gpu-0/0", "gpu-0", "gpu", &pod.Ref, util)}
+	nodes := []inventory.NodeView{
+		{Name: "gpu-0", Pool: "gpu", Accelerators: 1, Ready: true,
+			Allocation: api.AllocExclusive, Age: 30 * 24 * time.Hour},
+	}
+
+	if got := find(t, check.IdlePod{}, cluster(devices, []inventory.PodView{pod}, nodes)); len(got) != 0 {
+		t.Fatalf("got %d findings, want 0: the device's full-window coverage belongs to the "+
+			"previous holder, and this pod has two samples of its own", len(got))
 	}
 }

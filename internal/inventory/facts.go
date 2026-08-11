@@ -23,6 +23,10 @@ type Cluster struct {
 	Now     time.Time
 	Window  time.Duration
 
+	// Step is the sample interval the measurements were gathered at, needed to
+	// turn a sample count back into a coverage fraction over any span.
+	Step time.Duration
+
 	Devices []Device
 	Nodes   []NodeView
 	Pods    []PodView
@@ -66,9 +70,19 @@ type Device struct {
 
 // Stats is a summarised measurement series.
 type Stats struct {
-	Samples      int
-	Max          float64
-	Mean         float64
+	// Samples counts the samples of this record's own series — this holder's
+	// tenure on the device. A GPU reused inside the window produces one record
+	// per holder, and each counts only its own.
+	Samples int
+
+	Max  float64
+	Mean float64
+
+	// Completeness is coverage of the physical accelerator across the whole
+	// window. It answers "was this card being watched", which is the right
+	// question for a claim about a node. It is the wrong question for a claim
+	// about a pod that has not existed for the whole window — use
+	// CoverageOver for that.
 	Completeness float64
 
 	// ZeroThroughout is the load-bearing fact of the idle check, and it is true
@@ -80,6 +94,29 @@ type Stats struct {
 	LastNonZero *time.Time
 	FallowSince time.Time
 	Buckets     []float64
+}
+
+// CoverageOver reports what fraction of a span this record's own series covers.
+//
+// It exists because coverage measured against the scan window is the wrong
+// denominator for anything shorter-lived than the window. A pod that has
+// existed for two days of a fortnight can never exceed roughly 14% coverage by
+// that measure, so a fixed threshold silently discards every young pod — and a
+// GPU pod someone started last week and forgot is the single most actionable
+// thing this tool can find, as well as the first thing an evaluator will try.
+func (s Stats) CoverageOver(span, step time.Duration) float64 {
+	if step <= 0 || span <= 0 {
+		return 0
+	}
+	expected := span.Seconds() / step.Seconds()
+	if expected < 1 {
+		expected = 1
+	}
+	c := float64(s.Samples) / expected
+	if c > 1 {
+		return 1
+	}
+	return c
 }
 
 // FallowFor returns how long the device has read exactly zero up to now, and

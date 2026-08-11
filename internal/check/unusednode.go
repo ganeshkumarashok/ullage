@@ -44,6 +44,18 @@ func (UnusedNode) Describe() Descriptor {
 // accelerator on an empty node counts regardless of allocation model.
 func (UnusedNode) Applicable(d inventory.Device) bool { return true }
 
+// nodeWork is everything the utilization series can say about one node.
+type nodeWork struct {
+	// since is the shortest time since any accelerator here did work.
+	// Shortest, because one busy device makes the whole node occupied.
+	since time.Duration
+	// completeness is the coverage of the *least* observed accelerator, since
+	// a claim about the node is only as good as its weakest measurement.
+	completeness float64
+	// covered counts distinct accelerators that yielded a usable answer.
+	covered int
+}
+
 func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]RawFinding, error) {
 	// Occupancy is asked in the broadest possible terms, because every way of
 	// getting this wrong ends with the tool recommending the deletion of
@@ -67,7 +79,13 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 	// was seen doing work. Shortest, because one busy device is enough to make
 	// the whole node occupied — taking anything but the minimum would let a
 	// node with three idle GPUs and one working one read as idle.
-	lastWork := map[string]time.Duration{}
+	//
+	// It also records how well observed the node was, because "no accelerator
+	// here did work" is only a measurement if every accelerator here was
+	// actually watched. A node with four GPUs where three produced no series
+	// at all cannot support that claim on the strength of the fourth.
+	lastWork := map[string]nodeWork{}
+	countedDevice := map[string]bool{}
 	for _, d := range cl.Devices {
 		if d.Util.Samples == 0 {
 			continue
@@ -102,9 +120,22 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 			since = idle
 		}
 
-		if cur, seen := lastWork[d.Node]; !seen || since < cur {
-			lastWork[d.Node] = since
+		w, seen := lastWork[d.Node]
+		if !seen || since < w.since {
+			w.since = since
 		}
+		if !seen || d.Util.Completeness < w.completeness {
+			w.completeness = d.Util.Completeness
+		}
+		// Counted once per physical accelerator, not once per series. A GPU
+		// reused by a second pod inside the window returns a series per
+		// holder, and counting those separately would let one well observed
+		// device satisfy the coverage test for a node full of unobserved ones.
+		if !countedDevice[d.ID] {
+			countedDevice[d.ID] = true
+			w.covered++
+		}
+		lastWork[d.Node] = w
 	}
 
 	type poolAgg struct {
@@ -113,10 +144,19 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 		oldest   time.Duration
 		blockers []api.Blocker
 
-		// measured records that at least one node's fallow duration came from
-		// the utilization series rather than from node age alone.
-		measured   bool
-		unmeasured bool
+		// The reported fallow duration is the longest across the pool, so the
+		// evidence label has to describe *that* node. Recording only that some
+		// node in the pool was measured lets one node's measurement vouch for
+		// a different node's unmeasured age — which is precisely the
+		// overstatement this check keeps having to unlearn.
+		oldestNode         string
+		oldestMeasured     bool
+		oldestCompleteness float64
+
+		// Whether the pool's coverage is uniform, which is worth saying out
+		// loud when it is not.
+		anyMeasured   bool
+		anyUnmeasured bool
 
 		provider string
 		model    string
@@ -135,7 +175,11 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 		// at this instant but ran a job an hour ago is not idle capacity, and
 		// calling it idle for the node's whole lifetime — which is what the age
 		// alone would say — is an assertion the evidence contradicts.
-		if since, measured := lastWork[node.Name]; measured && since < p.IdleThreshold {
+		// Any evidence of recent work excludes the node, whether or not the
+		// coverage was good enough to make a positive claim. Evidence that
+		// something ran is not held to the same bar as evidence that nothing
+		// did, because the two errors are not symmetric.
+		if w, seen := lastWork[node.Name]; seen && w.since < p.IdleThreshold {
 			continue
 		}
 		// Each of these is a normal state that looks identical to waste from a
@@ -170,14 +214,40 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 		// as a fortnight of waste, which is exactly the kind of inflated number
 		// that gets a tool disbelieved on the number the reader can check.
 		empty := node.Age
-		if since, measured := lastWork[node.Name]; measured && since < empty {
-			empty = since
-			agg.measured = true
-		} else if !measured {
-			agg.unmeasured = true
+		nodeMeasured := false
+		completeness := 0.0
+		// Every accelerator on the node has to have been observed before the
+		// trailing zero run counts as a measurement of the node: three GPUs
+		// that produced no series at all cannot be vouched for by the fourth.
+		//
+		// The count is only comparable under exclusive allocation, where the
+		// advertised extended resource is the physical card. Under MIG or
+		// time-slicing the node advertises many more units than DCGM has
+		// series for, so requiring parity there would permanently deny a
+		// truthful label; one observed device is the best available bar.
+		want := 1
+		if node.Allocation == api.AllocExclusive {
+			want = node.Accelerators
 		}
+		// `<=` and not `<`: when the measurement and the age agree on the
+		// number, the number is still backed by a measurement, and the
+		// stronger provenance is the true one.
+		if w, seen := lastWork[node.Name]; seen && w.covered >= want && w.since <= empty {
+			empty = w.since
+			nodeMeasured = true
+			completeness = w.completeness
+		}
+		if nodeMeasured {
+			agg.anyMeasured = true
+		} else {
+			agg.anyUnmeasured = true
+		}
+		// Provenance travels with the number it describes.
 		if empty > agg.oldest {
 			agg.oldest = empty
+			agg.oldestNode = node.Name
+			agg.oldestMeasured = nodeMeasured
+			agg.oldestCompleteness = completeness
 		}
 
 		for _, pod := range cl.PodsOnNode(node.Name) {
@@ -207,19 +277,30 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 			fallow = cl.Window
 		}
 
+		// The reported duration is one specific node's, so the note names it
+		// rather than implying the whole pool was observed the same way.
+		longestNode := agg.oldestNode
+		if longestNode == "" {
+			longestNode = "these nodes"
+		}
+
 		notes := []string{"no pod holding an accelerator has been scheduled here"}
-		switch {
-		case agg.measured:
+		// Saying which of the two numbers this is matters, because they mean
+		// very different things and only one of them is an observation.
+		if agg.oldestMeasured {
 			notes = append(notes,
-				"the duration is the trailing run of zero utilization measured on these accelerators, "+
-					"not the age of the nodes")
-		case agg.unmeasured:
-			// Saying which of the two numbers this is matters, because they
-			// mean very different things and only one of them is an
-			// observation.
+				"the duration is the trailing run of zero utilization measured on "+
+					longestNode+", not the age of the nodes")
+		} else {
 			notes = append(notes,
-				"no utilization series covered these accelerators, so the duration is the age of the "+
-					"nodes — an upper bound on how long they could have been empty, not a measurement")
+				"no utilization series covered every accelerator on "+longestNode+", so the duration "+
+					"is that node's age — an upper bound on how long it could have been empty, "+
+					"not a measurement")
+		}
+		if agg.anyMeasured && agg.anyUnmeasured {
+			notes = append(notes,
+				"accelerator coverage is uneven across this pool: some nodes here were measured "+
+					"and others were not")
 		}
 
 		f := RawFinding{
@@ -236,7 +317,7 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 			Evidence: api.Evidence{
 				Window:             api.ISODuration(cl.Window),
 				FallowDuration:     api.ISODuration(fallow),
-				SampleCompleteness: 1,
+				SampleCompleteness: agg.oldestCompleteness,
 				Notes:              notes,
 			},
 			Blockers: dedupeBlockers(agg.blockers),

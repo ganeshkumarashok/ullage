@@ -84,6 +84,20 @@ func (c IdlePod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Ra
 		// What is never relaxed is the zero itself. No average is taken and no
 		// threshold is applied to the utilization value, because "low" is a
 		// judgement about someone else's workload and "zero" is not.
+		// Coverage is judged over the pod's own observable lifetime, not over
+		// the scan window. Against the window, a pod that has existed for two
+		// days of a fortnight tops out near 14% coverage however completely it
+		// was watched, so a fixed threshold would discard every young pod —
+		// and "someone started an expensive pod last week and forgot it" is
+		// both the most actionable finding this tool has and the first thing
+		// an evaluator will test.
+		span := cl.Window
+		if pod.StartTime != nil {
+			if lived := cl.Now.Sub(*pod.StartTime); lived < span {
+				span = lived
+			}
+		}
+
 		idle, fallow, completeness := true, cl.Window, 1.0
 		for _, d := range devs {
 			if !c.Applicable(d) {
@@ -98,12 +112,20 @@ func (c IdlePod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Ra
 			if since < fallow {
 				fallow = since
 			}
-			if d.Util.Completeness < completeness {
-				completeness = d.Util.Completeness
+			// The holder's own series, not the physical device's summed
+			// coverage: a GPU recycled from a previous job carries that job's
+			// samples, and letting them count here would have this pod borrow
+			// coverage it never had.
+			if cov := d.Util.CoverageOver(span, cl.Step); cov < completeness {
+				completeness = cov
 			}
 		}
 		// A gap large enough to hide a working period disqualifies the finding
 		// outright rather than merely lowering its confidence.
+		// A pod cannot have been idle for longer than it has existed.
+		if fallow > span {
+			fallow = span
+		}
 		if !idle || completeness < minCompleteness || fallow < p.IdleThreshold {
 			continue
 		}

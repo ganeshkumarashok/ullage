@@ -100,6 +100,7 @@ func (g *Gatherer) Gather(ctx context.Context, opts Options) (*inventory.Cluster
 		Context:           g.Kube.Context(),
 		Now:               end,
 		Window:            opts.Window,
+		Step:              ScrapeInterval,
 		Devices:           devices,
 		MetricsAttributed: schema.Found,
 	}
@@ -219,6 +220,14 @@ func (g *Gatherer) Gather(ctx context.Context, opts Options) (*inventory.Cluster
 	return cl, inv, warnings, nil
 }
 
+// ScrapeInterval is the assumed dcgm-exporter scrape period. Sample counts come
+// back from count_over_time, which reports points, so turning a count into a
+// coverage fraction needs the period those points arrive at. It is an
+// assumption, and it is the default for the exporter's own chart; getting it
+// wrong makes coverage estimates proportionally wrong in a direction that is
+// safe (a faster scrape reads as better coverage than assumed, never worse).
+const ScrapeInterval = 30 * time.Second
+
 // chunk is the sub-window each range aggregate is evaluated over.
 //
 // Aggregate push-down makes the *response* small, but it does not make the
@@ -288,14 +297,16 @@ func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *
 	// happened to sort last, understating completeness for exactly the busy
 	// devices whose coverage matters most.
 	samplesBy := map[string]float64{}
+	seriesSamplesBy := map[string]float64{}
 	for _, s := range samples {
 		samplesBy[deviceKey(s.Labels)] += s.Value
+		seriesSamplesBy[seriesKey(s.Labels, schema)] += s.Value
 	}
 
 	// Expected sample count, used to tell a scrape gap from a genuine zero. An
 	// absent sample is not an idle sample, and conflating them is how a tool
 	// confidently reports that a device nobody was watching did nothing.
-	expected := window.Seconds() / 30
+	expected := window.Seconds() / ScrapeInterval.Seconds()
 	if expected < 1 {
 		expected = 1
 	}
@@ -333,7 +344,7 @@ func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *
 			ZeroThroughout: s.Value == 0,
 			FallowSince:    start,
 			Completeness:   clamp(samplesBy[key]/expected, 0, 1),
-			Samples:        int(samplesBy[key]),
+			Samples:        int(seriesSamplesBy[seriesKey(s.Labels, schema)]),
 		}
 		if series, ok := shapeBy[key]; ok {
 			refine(&d.Util, series, start, end, step)
@@ -445,6 +456,17 @@ func (g *Gatherer) instant(ctx context.Context, query string, at time.Time) ([]p
 
 // Queries returns the recorded query trace.
 func (g *Gatherer) Queries() []string { return g.queries }
+
+// seriesKey identifies one series, which is one holder's tenure on one device.
+// Records differ from one another only by holder, so the device key plus the
+// pod label is the whole identity.
+func seriesKey(labels map[string]string, schema promql.LabelSchema) string {
+	pod := ""
+	if schema.Found {
+		pod = labels[schema.Pod] + "/" + labels[schema.Namespace]
+	}
+	return deviceKey(labels) + "|" + pod
+}
 
 func deviceKey(labels map[string]string) string {
 	return labelOf(labels, "Hostname", "hostname", "instance", "node") + "/" +
