@@ -301,7 +301,7 @@ git clone https://github.com/ganeshkumarashok/ullage && cd ullage
 make install          # go install into $GOBIN (use `make build` for ./bin/ullage)
 ```
 
-Or build the container — 16MB, distroless, and non-root (`USER 65532`). The
+Or build the container — around 10MB, distroless, and non-root (`USER 65532`). The
 supplied CronJob additionally runs it with a read-only root filesystem and every
 capability dropped:
 
@@ -310,12 +310,21 @@ make image     # tags ghcr.io/ganeshkumarashok/ullage:$(git describe --tags)
 docker run --rm ghcr.io/ganeshkumarashok/ullage:v0.1.0 demo
 ```
 
-Once `v0.1.0` is tagged, these will also work, and this note will go away:
+Released builds work the same way:
 
 ```console
 go install github.com/ganeshkumarashok/ullage/cmd/ullage@latest
 docker run --rm ghcr.io/ganeshkumarashok/ullage:v0.1.0 demo
-kubectl krew install ullage && kubectl ullage demo
+```
+
+Each release also publishes signed checksums and a krew plugin manifest
+(`krew-v0.1.0.yaml`). `kubectl krew install ullage` does **not** work yet — that
+needs the plugin to be accepted into
+[krew-index](https://github.com/kubernetes-sigs/krew-index), which has not been
+submitted. Until then the manifest can be installed directly:
+
+```console
+kubectl krew install --manifest-url https://github.com/ganeshkumarashok/ullage/releases/download/v0.1.0/krew-v0.1.0.yaml
 ```
 
 ## Run it on a schedule

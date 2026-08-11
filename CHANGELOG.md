@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.1.1 — released 2026-08-11
+
+Published v0.1.0, then verified every install path the README promises rather
+than asserting them:
+
+- `go install ...@v0.1.0` reported `v0.1.0-dev`, because `go install` applies
+  no ldflags. The resolved module version is read from the build info now, and
+  this was confirmed against a real pseudo-version pulled from the proxy.
+- The container was described as 16MB. Measured, it is ~10MB on amd64 and
+  ~9.5MB on arm64; non-root `65532` and distroless were confirmed by
+  inspecting the published image.
+- `kubectl krew install ullage` was documented and does not work: the plugin
+  has not been submitted to krew-index. The README now says so and gives the
+  `--manifest-url` form that does work.
+
+Both workflows passed on their first-ever execution, and the published darwin
+binary was downloaded and run to confirm it prints the README headline.
+
 ## Cold third-party review, and the arithmetic it found
 
 Goal: have two reviewers with no context read the repository the way a stranger
@@ -62,7 +80,7 @@ breaks `go install` for everyone.
 Next: publish, then watch the first CI run -- nothing in `.github/workflows/`
 has ever executed.
 
-## v0.1.0 — unreleased
+## v0.1.0 — released 2026-08-11
 
 First working end-to-end release.
 
