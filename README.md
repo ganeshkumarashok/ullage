@@ -228,6 +228,22 @@ res, err := ullage.Scan(ctx, ullage.Options{
 })
 ```
 
+The wire shape is pinned by a golden file,
+[`pkg/ullage/api/testdata/contract.txt`](pkg/ullage/api/testdata/contract.txt).
+Consumers do not compile against this package, so the Go type system protects
+nobody: renaming a JSON tag is invisible in review here and fatal in someone
+else's dashboard weeks later. Any rename, removal, retype — or addition — fails
+the test. Additions are a deliberate false alarm, because updating the golden
+file is the right moment to ask whether `apiVersion` should move:
+
+```console
+UPDATE_GOLDEN=1 go test ./pkg/ullage/api/
+```
+
+Every list field always serialises as `[]`, never `null`. A consumer iterating
+`suppressed` or `warnings` would otherwise break on exactly the healthiest
+clusters, and never in a demo.
+
 ## Checks
 
 | ID | Finds |
