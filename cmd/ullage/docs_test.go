@@ -189,3 +189,41 @@ func slug(h string) string {
 	}
 	return b.String()
 }
+
+// --help is the first thing many people run, and every flag it lists is a
+// promise the parser has to keep. It listed "--demo" as a common flag: that
+// works on `ullage explain`, where it is stripped by hand, but the top-level
+// scan rejects it with "flag provided but not defined: -demo" -- a stranger's
+// very first command failing on something the help just told them to use.
+//
+// The shipped ci-gate.sh example made exactly this mistake, which is a good
+// sign the help text taught it.
+func TestEveryFlagInTheHelpTextIsRealAtTheTopLevel(t *testing.T) {
+	// Every mention counts, not just the flag column. The --demo that caused
+	// this appeared mid-sentence in another flag's description, which is
+	// exactly where a reader picks a flag up and exactly where a check
+	// looking only at the left-hand column will not find it.
+	re := regexp.MustCompile(`(--[a-z0-9-]+)`)
+
+	seen := map[string]bool{}
+	for _, m := range re.FindAllStringSubmatch(usage, -1) {
+		name := strings.TrimPrefix(m[1], "--")
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+
+		f := newFlags("help-check")
+		f.fs.SetOutput(discard{})
+		if f.fs.Lookup(name) == nil {
+			t.Errorf("--help mentions %q, but the top-level flag set "+
+				"has no such flag. Someone's first command will fail with "+
+				"\"flag provided but not defined\" on something the help told them to type. "+
+				"A flag that only works on a subcommand does not belong in the top-level "+
+				"help: name the subcommand instead.", m[1])
+		}
+	}
+	if len(seen) == 0 {
+		t.Fatal("no flags were found in the usage text, so this test is checking nothing")
+	}
+}

@@ -44,7 +44,7 @@ Usage:
   ullage version
 
 Common flags:
-  --prometheus URL       metrics endpoint (required unless --demo)
+  --prometheus URL       metrics endpoint (required; or run "ullage demo")
   --window DURATION      analysis window (default 14d)
   --output FORMAT        table | json | html (default table)
   --redact               strip cluster, owner and endpoint names from --output html
@@ -480,7 +480,7 @@ func emit(res *api.Result, f *flags) error {
 			return err
 		}
 	default:
-		return fmt.Errorf("unknown output format %q", f.output)
+		return fmt.Errorf("unknown output format %q; want table, json or html", f.output)
 	}
 	if n := len(res.Recommendations); n > 0 && !f.exitZero {
 		return &findingsError{n: n}

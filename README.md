@@ -286,6 +286,11 @@ OpenCost for allocation, `ullage` for the subset that bought nothing.
 
 ## Install
 
+One binary, one third-party Go dependency ([`yaml.v3`](https://gopkg.in/yaml.v3)).
+No client-go, no controller-runtime, no vendored Kubernetes tree, no CRDs, no
+agent, no operator, and nothing to install into your cluster. A clone builds in
+a few seconds and the test suite runs without a cluster.
+
 From source — works today, needs Go 1.24+:
 
 ```console
