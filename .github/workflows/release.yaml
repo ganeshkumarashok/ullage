@@ -12,7 +12,22 @@ permissions:
   id-token: write
 
 jobs:
+  # A tag is not a promise that the code works; `main` can be tagged from a
+  # phone. Publishing runs the same suite CI runs, and nothing ships if it is
+  # red, because a broken release is the one artefact that cannot be recalled.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          cache: true
+      - run: make check
+      - run: go test -race ./...
+
   binaries:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -58,14 +73,65 @@ jobs:
           esac
           /tmp/ullage demo --quiet --exit-zero >/dev/null
 
+      # Krew installs by digest, so the manifest has to be rendered against the
+      # artifacts that were actually built. Checking in a manifest with real
+      # digests is impossible (they do not exist until this step) and checking
+      # in placeholders is worse, because it looks submittable.
+      - name: render the krew manifest against the real artifacts
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME}"
+          out="dist/krew-${version}.yaml"
+          cp .krew.yaml "$out"
+          python3 - "$out" "$version" <<'PY'
+          import re, sys
+          path, version = sys.argv[1], sys.argv[2]
+          s = open(path).read()
+          s = s.replace("{{ .TagName }}", version)
+          digests = {}
+          for line in open("dist/checksums.txt"):
+              digest, name = line.split()
+              digests[name.lstrip("*")] = digest
+          def sub(m):
+              key = m.group(1)                       # e.g. Darwin_amd64
+              name = f"ullage_{version}_{key.lower()}.tar.gz"
+              if name not in digests:
+                  raise SystemExit(f"no artifact {name}; built: {sorted(digests)}")
+              return digests[name]
+          s, n = re.subn(r"\{\{ \.Sha256([A-Za-z0-9_]+) \}\}", sub, s)
+          if n != 4:
+              raise SystemExit(f"replaced {n} digests, expected 4")
+          if "{{" in s:
+              raise SystemExit("manifest still contains an unrendered placeholder")
+          open(path, "w").write(s)
+          print(s)
+          PY
+
+      # The manifest is only useful if the URLs in it are the files being
+      # uploaded beside it. This compares the two lists rather than trusting
+      # that the naming convention in two files stayed in sync.
+      - name: the krew manifest points at artifacts that exist
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME}"
+          grep -o 'download/[^ ]*\.tar\.gz' "dist/krew-${version}.yaml" \
+            | sed 's#.*/##' | sort -u > /tmp/wanted
+          (cd dist && ls *.tar.gz | sort -u) > /tmp/built
+          if ! diff -u /tmp/built /tmp/wanted; then
+            echo "the krew manifest asks for artifacts this release does not publish"
+            exit 1
+          fi
+
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.tar.gz
             dist/checksums.txt
+            dist/krew-*.yaml
           generate_release_notes: true
 
   image:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

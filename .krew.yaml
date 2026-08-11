@@ -5,8 +5,11 @@
 # a name that isn't k-prefixed is otherwise easy to miss. Installing through
 # Krew gets the same binary under a name people will find.
 #
-# The sha256 fields below are filled in by the release workflow from the actual
-# artifacts; a placeholder here would install something unverified.
+# This file is a template, not a submittable manifest. The release workflow
+# renders it against the real artifacts and attaches the result to the release
+# as krew-<tag>.yaml; that rendered file is what goes to krew-index. Submitting
+# this one would install nothing, because {{ .TagName }} is not a version and
+# the digests below are not digests.
 apiVersion: krew.googlecontainertools.github.com/v1alpha2
 kind: Plugin
 metadata:
@@ -39,27 +42,27 @@ spec:
         matchLabels:
           os: darwin
           arch: amd64
-      uri: https://github.com/ullage-project/ullage/releases/download/{{ .TagName }}/ullage_darwin_amd64.tar.gz
+      uri: https://github.com/ullage-project/ullage/releases/download/{{ .TagName }}/ullage_{{ .TagName }}_darwin_amd64.tar.gz
       sha256: "{{ .Sha256Darwin_amd64 }}"
       bin: ullage
     - selector:
         matchLabels:
           os: darwin
           arch: arm64
-      uri: https://github.com/ullage-project/ullage/releases/download/{{ .TagName }}/ullage_darwin_arm64.tar.gz
+      uri: https://github.com/ullage-project/ullage/releases/download/{{ .TagName }}/ullage_{{ .TagName }}_darwin_arm64.tar.gz
       sha256: "{{ .Sha256Darwin_arm64 }}"
       bin: ullage
     - selector:
         matchLabels:
           os: linux
           arch: amd64
-      uri: https://github.com/ullage-project/ullage/releases/download/{{ .TagName }}/ullage_linux_amd64.tar.gz
+      uri: https://github.com/ullage-project/ullage/releases/download/{{ .TagName }}/ullage_{{ .TagName }}_linux_amd64.tar.gz
       sha256: "{{ .Sha256Linux_amd64 }}"
       bin: ullage
     - selector:
         matchLabels:
           os: linux
           arch: arm64
-      uri: https://github.com/ullage-project/ullage/releases/download/{{ .TagName }}/ullage_linux_arm64.tar.gz
+      uri: https://github.com/ullage-project/ullage/releases/download/{{ .TagName }}/ullage_{{ .TagName }}_linux_arm64.tar.gz
       sha256: "{{ .Sha256Linux_arm64 }}"
       bin: ullage
