@@ -70,9 +70,99 @@ ownership, fixes, grouping, ranking, pricing and rendering happen once
 downstream. The JSON contract lives in `pkg/ullage/api`, outside `internal/`,
 so embedders can depend on it.
 
+## Post-POC review round
+
+Goal: have subagents review the high-level idea and every layer of the stack for
+adoption fit, then act on what came back. The review was run against the working
+artifact rather than a plan, and it found two ways the tool would recommend
+deleting hardware that was in use.
+
+### Critical — wrong recommendations on a real cluster
+
+- **MIG slices were invisible.** Under the mixed strategy a pod requests
+  `nvidia.com/mig-1g.5gb`, never `nvidia.com/gpu`, so its whole-device count is
+  zero. `unused-node` built occupancy from whole devices, read a MIG pool at
+  capacity as empty, priced it and attached a scale-to-zero command. The demo
+  showed it in the open: `a100-mig-0` carried a 30%-utilization series *and*
+  appeared as a priced recommendation, while the same two devices were listed
+  under "not analysed" — so the headline total charged hours against devices the
+  tool said it had not analysed.
+  Fixed by asking occupancy in the broadest terms (whole devices, DRA claims,
+  MIG profiles, time-sliced replicas). `PodView.Occupies` is a **method**, not a
+  field: a field can be left unset by whoever adds the next allocation model,
+  and a unit test caught exactly that during the fix.
+- **The fallow duration was asserted, not measured.** `unused-node` read only
+  the current pod snapshot and then reported the node's *age* as how long it had
+  been fallow, so a batch pool empty at scan time was billed for its whole
+  lifetime. Node age is now an upper bound only; the trailing zero-utilization
+  run wins where devices were measured, a pool that did work inside the idle
+  threshold is dropped, and where nothing was measured the evidence says the
+  number is the node's age rather than passing it off as an observation.
+  Measurement is also now a second, independent occupancy check — if any device
+  reported work, work ran there, whatever the object model said.
+
+### Correctness
+
+- **Karpenter.** The "this pool may be held at a deliberate minimum" caution is
+  a cluster-autoscaler concept. Karpenter has no minimum size, so a Karpenter
+  cluster read as having no autoscaler and every finding collected a hedge that
+  could not apply. Karpenter is detected via NodePools; a zero-node disruption
+  budget is treated as a floor, a schedule-bounded one lowers confidence, and
+  `karpenter.sh/do-not-disrupt` is a named blocker. Karpenter pools no longer
+  receive `eksctl`/`az` commands, which name objects that do not exist.
+- **Autoscaler floors are summed across a pool's node groups**, since AKS makes
+  one VMSS per zone and EKS one ASG per zone. With zone minimums of {0,0,2} the
+  old longest-name tiebreak returned 0 (calling reserved capacity waste) or 2.
+  Summing naively then sums "gpu-big" into "gpu", because pool names nest, so
+  each node group is assigned to the longest pool name that matches it before
+  the floors are added.
+- **List pagination.** Every list was a single unpaged GET. On a cluster large
+  enough to be worth scanning the API server truncates, the missing pods are
+  invisible, and the nodes they occupy read as empty — the worst failure mode
+  here, because the output still looks plausible. The demo API server now pages
+  at three items so every run exercises the path.
+- **Range aggregates are chunked at 24h.** `max_over_time` makes the response
+  small but Prometheus still loads every raw sample to evaluate it, against a
+  50M default. One whole-window query fails at ~1,240 GPUs, inside the target
+  range. Chunking moves the ceiling to ~17,000.
+- **Findings rank by cost when a price is known.** Ranking 2,700 L4-hours above
+  1,000 A100-hours put the cheapest finding first, in a tool printing dollars
+  on every row.
+
+### Honesty
+
+- `explain` no longer prints "Peak utilization 100%" three lines above "read
+  exactly zero" — the peak is over the window, the claim is over the trailing
+  fallow run, and unqualified it reads as self-contradiction.
+- `--prometheus-token-file` was accepted, plumbed through two structs, and never
+  read. Now implemented, and re-read per request because a projected
+  ServiceAccount token rotates hourly and a large scan can outlive one.
+- `--prometheus-auth azure-monitor` was an alias for bearer. Removed: naming a
+  provider while only setting a static header promises support that does not
+  exist and fails after someone has committed.
+- `--output yaml` was in the help and returned "not implemented".
+- `--idle-threshold` help said 72h against an actual default of 24h.
+- README gained a support matrix stating what is *not* covered — AMD/Intel
+  discovered but not measured, MIG/time-slicing counted but never analysed,
+  managed Prometheus needing a signing proxy.
+
+### Adoption
+
+- Distroless image (16.3MB, non-root, verified under `--read-only`), weekly
+  CronJob, and an RBAC manifest annotated per `apiGroups` block, with ConfigMap
+  access scoped by `resourceNames` to the single autoscaler status object.
+- `--exit-zero`, because exit 1 on findings is right for a CI gate and wrong for
+  a CronJob, where it turns every successful scan into a failed Job.
+- CI runs gofmt, vet, `test -race`, the demo, and asserts the contract invariant
+  that analysed + excluded == observed.
+- Progress output is gated on `isTerminal(os.Stderr)`; it previously wrote
+  `\r\033[K` unconditionally and concatenated into one line when piped.
+
 ### Next
 
-- Kubernetes list pagination before the 1000-GPU target.
 - JSON Schema plus a golden test over the contract.
 - Reconcile the field names in the v0.1 UX spec, which now lags the code.
 - Per-client discovery cache; exec credential plugin expiry.
+- `.ullage.yaml` is written by `ignore` but still never read.
+- A second metric source (AMD `device-metrics-exporter`) to make the
+  vendor-neutral fact layer true in practice rather than only in structure.
