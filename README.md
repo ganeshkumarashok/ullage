@@ -258,8 +258,15 @@ OpenCost for allocation, `ullage` for the subset that bought nothing.
 
 - **It will not call a workload inefficient.** GPU utilization is a poor measure
   of how hard a device is working — a single-threaded kernel reads 100%. The
-  only thing the metric proves is its zero, so *zero* is the only thing `ullage`
-  claims.
+  only thing the metric supports is its zero, so *zero* is the only thing
+  `ullage` claims.
+- **It will not trust one gauge to mean "idle".** `DCGM_FI_DEV_GPU_UTIL`
+  reports SM activity alone. A transcoding pipeline living on NVENC, a job
+  moving data over the copy engines, and a model sitting resident in
+  framebuffer waiting for requests all read a clean zero on it. `ullage` also
+  reads the encoder, decoder, copy-engine and framebuffer gauges, and a device
+  busy on any of them is not reported. Where those gauges are not exported it
+  says so in the output rather than treating the SM zero as the whole story.
 - **It will not treat a low average as idle.** A job running one hard hour in
   twenty-four averages 4%. Tools that threshold on averages flag it; its owner
   loses real work.

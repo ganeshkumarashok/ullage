@@ -50,6 +50,38 @@ and safe, rather than another utilization dashboard.
 - **Devices with no metrics vanished from the accounting** — 40 of 68
   accelerators were neither analysed nor explained. Added `ULL-105`.
 
+### Numbers that were confidently wrong on real clusters
+
+- **MIG under the `single` strategy was priced as whole cards.** That strategy
+  advertises instances as plain `nvidia.com/gpu` and feature discovery rewrites
+  `gpu.count` to match, so an 8-card A100 node partitioned seven ways reports
+  56 — arithmetically identical to 56 whole A100s. It stayed in the analysis
+  instead of being excluded like every other MIG node, each 1g.5gb slice was
+  priced at the rate of the card it was cut from, and its idleness was measured
+  with a gauge that cannot see an individual instance. A sevenfold overstatement
+  aimed at the users most likely to care. The product label gives it away, and a
+  test holds MIG-capable-but-disabled nodes on the other side of the line,
+  because dropping real hardware is the quieter failure.
+- **DRA counted every claimed device as a GPU.** DRA allocates NICs and FPGAs
+  through the identical shape; the driver field was parsed and ignored. A pod
+  holding two RDMA NICs held two H100s as far as the scan was concerned. Claims
+  shared between pods were also billed in full to each of them, and that count
+  is summed into the pod's request — one device shared three ways reported
+  three, and the census reconciliation meant to catch invented hardware would
+  have seen it as real.
+- **Every cluster on a central Thanos was read as this one.** Queries went out
+  as bare metric names. Node names are not unique across clusters, so a busy
+  device in one cluster answered for an idle device of the same name in
+  another, in both directions, leaving no trace once samples were joined to
+  nodes. There is now a `--metrics-selector`, and — because nobody knows to
+  reach for a flag they have not been told about — detection that names the
+  label, the clusters found, and the flag to pass.
+- **The census read `allocatable`, but the invoice is for `capacity`.** The
+  device plugin withdraws a device it cannot talk to, so an 8-GPU node with two
+  dead cards advertises six. Those two are the purest case of the thing this
+  tool exists to find — paid for by the hour, incapable of work — and they were
+  neither idle nor busy nor counted nor mentioned.
+
 ### Failed attempts
 
 - `golang.org/x/term` for TTY detection was dropped to preserve the
