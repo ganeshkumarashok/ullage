@@ -5,6 +5,11 @@
 # them, often by more than half. They exist so the first run shows a number of
 # the right order of magnitude rather than nothing at all.
 #
+# Where a SKU sells across a range of list prices, the low end is chosen on
+# purpose. A tool that tells you how much you are wasting should err towards
+# understating it, so the number survives an argument with the person who owns
+# the budget.
+#
 # Replace them with your own:
 #
 #   ullage --pricing ./my-rates.yaml
