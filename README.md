@@ -264,12 +264,58 @@ See [`internal/check/check_test.go`](internal/check/check_test.go).
 
 ## Suppressing
 
+Every scanner produces findings its owners have consciously accepted. A tool
+with no way to record that gets muted or wrapped in a `grep`, and either way the
+decision is lost, so the next person rediscovers the finding and reopens the
+argument.
+
+`ullage explain` prints the exact command, including the finding id:
+
 ```console
-ullage ignore research/jupyter-alice --reason "reserved for the Q3 eval" --until 2026-03-01
+$ ullage explain research/jupyter-alice
+...
+  Suppress: ullage ignore idle-pod/research/jupyter-alice --reason "..." --until 2026-05-14
 ```
 
-Writes to `.ullage.yaml`. A reason is required: a suppression without one is
-indistinguishable from a mistake six months later.
+Which writes to `.ullage.yaml`:
+
+```yaml
+suppress:
+  - id: "idle-pod/research/jupyter-alice"
+    reason: "reserved for the Q3 eval"
+    until: "2026-05-14"
+```
+
+Ids are slash-separated, so `*` works per segment — `unused-node/pool/*` for one
+check across every pool, `*/research/*` for one namespace. A `*` never crosses a
+`/`, because the difference between "cluster-scoped" and "every namespace" is a
+lot of hidden findings.
+
+Four rules, each of which exists because the alternative is silent:
+
+- **A reason is required.** Six months later it is indistinguishable from a
+  mistake, and the person judging it is rarely the person who wrote it.
+- **Expired entries stop applying and are named.** An expiry that quietly
+  renews itself is not an expiry. Nothing is ever rewritten for you.
+- **Entries that match nothing are reported.** Either the id is wrong and you
+  are not suppressing what you think, or the problem is fixed and the entry is
+  litter.
+- **The suppressed total is printed with its size**, not as a bare count:
+
+  ```
+  1 finding suppressed by .ullage.yaml (1.0k accelerator-hours, ~$3,427).
+  ```
+
+  Suppression records a decision. It is not a way to make a cluster look clean.
+
+A malformed file is a hard error rather than a warning — continuing would print
+findings you asked not to see, and you would read that as the feature being
+broken rather than the file.
+
+Use `--config` to point at a different file; `ullage ignore --config` writes to
+the same one. Embedders pass `ullage.Options.ConfigFile`, which is empty by
+default: a library call will not reach into whatever directory its process
+happens to have started in.
 
 ## Costs
 

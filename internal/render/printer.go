@@ -16,6 +16,10 @@ type Options struct {
 	Top           int
 	MinConfidence string
 	NoCost        bool
+
+	// ConfigFile is named in the suppression summary so a reader who did not
+	// write the entries can find them.
+	ConfigFile string
 }
 
 // DetectTTY resolves colour and width from the environment.

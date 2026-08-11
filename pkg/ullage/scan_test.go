@@ -2,6 +2,7 @@ package ullage_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -317,4 +318,31 @@ func indexOf(s, sub string) int {
 		}
 	}
 	return -1
+}
+
+// A field declared as a list must serialise as [], never as null. Every
+// consumer that iterates one breaks on the first cluster that has none, and
+// "no suppressions" or "no warnings" is the overwhelmingly common case — so the
+// bug appears for the healthiest clusters and never in a demo.
+func TestListFieldsAreNeverNull(t *testing.T) {
+	res := scan(t)
+	raw, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"recommendations", "suppressed", "notAnalyzed", "warnings"} {
+		v, ok := m[k]
+		if !ok {
+			t.Errorf("%q is absent from the contract", k)
+			continue
+		}
+		if string(v) == "null" {
+			t.Errorf("%q serialised as null; a consumer iterating it panics on any "+
+				"cluster where the list is empty", k)
+		}
+	}
 }

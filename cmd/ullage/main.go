@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ullage-project/ullage/internal/check"
+	"github.com/ullage-project/ullage/internal/config"
 	"github.com/ullage-project/ullage/internal/demo"
 	"github.com/ullage-project/ullage/internal/pricing"
 	"github.com/ullage-project/ullage/internal/render"
@@ -49,6 +50,7 @@ Common flags:
   --namespace NS         restrict to a namespace (repeatable)
   --checks LIST          comma-separated check IDs to run
   --min-confidence LEVEL high | medium | low (default medium)
+  --config PATH         suppression file (default .ullage.yaml)
   --explain-queries      print the PromQL used, then exit
   --no-cost              omit money from the output
 
@@ -135,6 +137,7 @@ type flags struct {
 	namespaces    stringList
 	checks        string
 	pricing       string
+	config        string
 
 	output   string
 	top      int
@@ -176,6 +179,7 @@ func newFlags(name string) *flags {
 	f.fs.Var(&f.namespaces, "namespace", "restrict to a namespace (repeatable)")
 	f.fs.StringVar(&f.checks, "checks", "", "comma-separated check IDs")
 	f.fs.StringVar(&f.pricing, "pricing", "", "path to a pricing file")
+	f.fs.StringVar(&f.config, "config", config.DefaultPath, "suppression file")
 
 	f.fs.StringVar(&f.output, "output", "table", "table | json")
 	f.fs.StringVar(&f.output, "o", "table", "table | json (shorthand)")
@@ -226,6 +230,7 @@ func (f *flags) options() (ullage.Options, error) {
 		Namespaces:     f.namespaces,
 		Checks:         checks,
 		Pricing:        prices,
+		ConfigFile:     f.config,
 		Trace:          f.trace || f.explainQ,
 		Version:        version,
 	}, nil
@@ -290,6 +295,7 @@ func emit(res *api.Result, f *flags) error {
 			Version: version, Top: f.top,
 			MinConfidence: res.Scan.Params.MinConfidence,
 			NoCost:        f.noCost,
+			ConfigFile:    f.config,
 		}
 		o.DetectTTY(os.Stdout)
 		if f.noColor {
@@ -490,17 +496,32 @@ func cmdIgnore(args []string) error {
 		return errors.New("usage: ullage ignore <finding-id> [--reason TEXT] [--until DATE]")
 	}
 	id := args[0]
+	// Validated here rather than discovered later. A suppression whose id can
+	// never match looks identical, in the file and in the output, to one that
+	// works — the finding simply keeps appearing and the reader concludes the
+	// feature is broken. Finding ids start with a check id, so that is
+	// checkable at the moment of the mistake.
+	if head, _, ok := strings.Cut(id, "/"); !ok {
+		return fmt.Errorf("%q is not a finding id: ids look like <check>/<namespace>/<name>, "+
+			"and the exact one is printed by `ullage explain`", id)
+	} else if head != "*" {
+		if _, known := check.Lookup(head); !known {
+			return fmt.Errorf("%q does not start with a known check: got %q, want one of %s",
+				id, head, strings.Join(checkIDs(), ", "))
+		}
+	}
 	fs := flag.NewFlagSet("ignore", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	reason := fs.String("reason", "", "why this is being suppressed")
 	until := fs.String("until", "", "expiry date, YYYY-MM-DD")
+	// Shares the flag name with the scan, so `--config` cannot mean two files.
+	path := fs.String("config", config.DefaultPath, "suppression file to write to")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
 	if *reason == "" {
 		return errors.New("--reason is required: a suppression without a reason is indistinguishable from a mistake six months later")
 	}
-	path := ".ullage.yaml"
 	entry := fmt.Sprintf("  - id: %q\n    reason: %q\n", id, *reason)
 	if *until != "" {
 		if _, err := time.Parse("2006-01-02", *until); err != nil {
@@ -509,22 +530,27 @@ func cmdIgnore(args []string) error {
 		entry += fmt.Sprintf("    until: %q\n", *until)
 	}
 
-	existing, err := os.ReadFile(path)
+	existing, err := os.ReadFile(*path)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	var out string
 	if len(existing) == 0 {
-		out = "# ullage suppressions\n# every entry needs a reason, and entries with an expiry are removed\n# automatically once it passes.\nsuppress:\n" + entry
+		out = "# ullage suppressions\n" +
+			"# Every entry needs a reason. An entry whose `until` has passed stops\n" +
+			"# applying and is reported by the next scan so it can be removed; nothing\n" +
+			"# here is ever rewritten automatically.\n" +
+			"# An id may use * per path segment, e.g. idle-allocation/team-a/*\n" +
+			"suppress:\n" + entry
 	} else if strings.Contains(string(existing), "suppress:") {
 		out = strings.TrimRight(string(existing), "\n") + "\n" + entry
 	} else {
 		out = strings.TrimRight(string(existing), "\n") + "\nsuppress:\n" + entry
 	}
-	if err := os.WriteFile(path, []byte(out), 0o644); err != nil {
+	if err := os.WriteFile(*path, []byte(out), 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("suppressed %s in %s\n", id, path)
+	fmt.Printf("suppressed %s in %s\n", id, *path)
 	return nil
 }
 
@@ -532,4 +558,12 @@ func cmdIgnore(args []string) error {
 func isTerminal(f *os.File) bool {
 	info, err := f.Stat()
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+func checkIDs() []string {
+	var out []string
+	for _, c := range check.All() {
+		out = append(out, c.Describe().ID)
+	}
+	return out
 }

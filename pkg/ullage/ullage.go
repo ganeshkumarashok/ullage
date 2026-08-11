@@ -11,6 +11,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/ullage-project/ullage/internal/config"
 	"github.com/ullage-project/ullage/internal/kube"
 	"github.com/ullage-project/ullage/internal/promql"
 	"github.com/ullage-project/ullage/internal/scan"
@@ -35,6 +36,12 @@ type Options struct {
 	Namespaces     []string
 	Checks         []string
 	Pricing        *api.Pricing
+
+	// ConfigFile is a .ullage.yaml suppression list. Empty means no
+	// suppressions: a library call reaching into the working directory for a
+	// file the caller never mentioned would be a surprise, so the CLI passes
+	// the default path explicitly and an embedder opts in.
+	ConfigFile string
 
 	// Trace records the exact queries issued, so a caller can show its users
 	// how a claim was reached.
@@ -74,6 +81,27 @@ func Scan(ctx context.Context, opts Options) (*api.Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Resolved here rather than left to scan.Options.Defaults, because a zero
+	// clock makes every expiry date lie in the future and quietly resurrects
+	// suppressions their authors time-boxed.
+	now := opts.Now
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	opts.Now = now
+
+	// Read before any network call: a malformed suppression file should fail in
+	// milliseconds, not after a minute of queries. Only when asked for, so an
+	// embedder is never surprised by a file in whatever directory its process
+	// happens to have been started in.
+	var sup *config.Suppressions
+	if opts.ConfigFile != "" {
+		var err error
+		if sup, err = config.Load(opts.ConfigFile, now); err != nil {
+			return nil, err
+		}
+	}
+
 	pc := promql.New(promql.Config{
 		URL:       opts.Prometheus.URL,
 		Auth:      opts.Prometheus.Auth,
@@ -101,6 +129,7 @@ func Scan(ctx context.Context, opts Options) (*api.Result, error) {
 		Namespaces:     opts.Namespaces,
 		Checks:         opts.Checks,
 		Pricing:        opts.Pricing,
+		Suppressions:   sup,
 		Now:            opts.Now,
 		Trace:          opts.Trace,
 		Version:        opts.Version,
@@ -131,6 +160,9 @@ func Scan(ctx context.Context, opts Options) (*api.Result, error) {
 	}
 	res.Scan.PrometheusURL = pc.URL()
 	res.Warnings = append(warnings, res.Warnings...)
+	if res.Warnings == nil {
+		res.Warnings = []string{}
+	}
 	if opts.Trace {
 		res.Scan.Queries = g.Queries()
 	}

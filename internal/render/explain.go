@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/ullage-project/ullage/pkg/ullage/api"
 )
@@ -149,7 +150,14 @@ func Explain(w io.Writer, f *api.Finding, res *api.Result, o Options) error {
 	p.para(prevention(f))
 	p.line("")
 
-	p.dim("  Suppress: ullage ignore %s --reason \"...\" --until 2025-12-31", f.Workload.Ref())
+	// The finding id, not the workload reference. Suppressions match on the
+	// id, so printing the reference here produced an entry that could never
+	// match — following the tool's own printed advice silently did nothing.
+	// The example expiry is relative to today. A hardcoded date is guaranteed to
+	// become a date in the past, and copying it produces a suppression that
+	// expired before it was written.
+	p.dim("  Suppress: ullage ignore %s --reason \"...\" --until %s",
+		f.ID, time.Now().AddDate(0, 3, 0).Format("2006-01-02"))
 	p.dim("  Docs:     %s", f.Docs)
 	p.line("")
 	return p.err

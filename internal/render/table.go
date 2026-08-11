@@ -242,6 +242,35 @@ func (p *printer) renderFooter(res *api.Result) {
 		p.line("")
 	}
 
+	// Printed with its size, never as a bare count. Suppression exists so a
+	// team can record a decision, not so waste can be made to disappear; a
+	// suppressed total that nobody can see is how a scanner ends up reporting
+	// a clean cluster that is half idle.
+	if n := len(res.Suppressed); n > 0 {
+		hoursTotal, cost, currency := 0.0, 0.0, ""
+		priced := true
+		for _, f := range res.Suppressed {
+			hoursTotal += f.Impact.GPUHoursFallow
+			if f.Impact.WindowCost == nil {
+				priced = false
+				continue
+			}
+			cost += *f.Impact.WindowCost
+			currency = f.Impact.Currency
+		}
+		noun := "findings"
+		if n == 1 {
+			noun = "finding"
+		}
+		line := fmt.Sprintf("  %d %s suppressed by %s (%s accelerator-hours",
+			n, noun, p.o.ConfigFile, hours(hoursTotal))
+		if priced && cost > 0 && !p.o.NoCost {
+			line += fmt.Sprintf(", ~%s%s", currencySymbol(currency), money(cost))
+		}
+		p.dim("%s).", line)
+		p.line("")
+	}
+
 	// One suggested next command, personalised to the top finding the reader can
 	// actually act on. A menu of six commands is a menu; one command is a next
 	// step.

@@ -172,9 +172,19 @@ func Analyse(ctx context.Context, cl *inventory.Cluster, inv *inventory.Inventor
 		suppressed[i].Rank = i + 1
 	}
 
-	res.Recommendations = ranked
-	res.ByDesign = byDesign
-	res.Suppressed = suppressed
+	// Assigned only when non-empty, so the empty slices set on Result above
+	// survive. A field declared as a list must never serialise as null: every
+	// consumer that iterates it breaks on the first cluster that has none, and
+	// "no suppressions" is by far the most common case.
+	if len(ranked) > 0 {
+		res.Recommendations = ranked
+	}
+	if len(byDesign) > 0 {
+		res.ByDesign = byDesign
+	}
+	if len(suppressed) > 0 {
+		res.Suppressed = suppressed
+	}
 	res.BelowThreshold = below
 	res.Scan.GPUHoursFallow = total
 	res.UnmetDemand = unmetDemand(cl)
