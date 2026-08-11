@@ -3,6 +3,7 @@ package scan
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -135,7 +136,7 @@ func (g *Gatherer) Gather(ctx context.Context, opts Options) (*inventory.Cluster
 				"schema, so per-pod checks cannot run; node-level checks still apply")
 	}
 
-	devices, powerless, engines, err := g.devices(ctx, schema, inv, start, end, opts.Step)
+	devices, powerless, engines, scrape, err := g.devices(ctx, schema, inv, start, end, opts.Step)
 	if err != nil {
 		return nil, inv, warnings, err
 	}
@@ -160,7 +161,7 @@ func (g *Gatherer) Gather(ctx context.Context, opts Options) (*inventory.Cluster
 		Context:           g.Kube.Context(),
 		Now:               end,
 		Window:            opts.Window,
-		Step:              ScrapeInterval,
+		Step:              scrape,
 		Devices:           devices,
 		MetricsAttributed: schema.Found,
 		PodLabelSchema:    schema.Pod,
@@ -292,13 +293,78 @@ func (g *Gatherer) Gather(ctx context.Context, opts Options) (*inventory.Cluster
 	return cl, inv, warnings, nil
 }
 
-// ScrapeInterval is the assumed dcgm-exporter scrape period. Sample counts come
-// back from count_over_time, which reports points, so turning a count into a
-// coverage fraction needs the period those points arrive at. It is an
-// assumption, and it is the default for the exporter's own chart; getting it
-// wrong makes coverage estimates proportionally wrong in a direction that is
-// safe (a faster scrape reads as better coverage than assumed, never worse).
+// ScrapeInterval is the fallback dcgm-exporter scrape period, used only when
+// the real one cannot be measured. It is the default in the exporter's own
+// chart.
+//
+// It was previously assumed unconditionally, and the direction of the error is
+// not safe. Sample counts come from count_over_time, which reports points, so
+// coverage is samples divided by window/interval. Assume 30s against an
+// exporter scraping at 15s and the expected count is halved, so seven days of
+// data across a fourteen-day window divides out to 100% coverage -- a full
+// fortnight of confident observation conjured from half a window of data, on
+// the one number that decides whether a recommendation is trustworthy enough
+// to print.
 const ScrapeInterval = 30 * time.Second
+
+// measureScrapeInterval asks the data how often it arrives instead of assuming.
+//
+// One instant query over a recent hour: the number of points a series produced
+// in an hour divides into an hour to give the period. The busiest series is
+// used because a series that started mid-hour would understate it, and
+// overstating the interval overstates coverage, which is the failure this
+// exists to prevent.
+//
+// A cluster that cannot answer keeps the documented default. Guessing wrong is
+// survivable; guessing silently in the flattering direction is not, so the
+// measured value is recorded and reported.
+func (g *Gatherer) measureScrapeInterval(ctx context.Context, end time.Time) (time.Duration, bool) {
+	const probe = time.Hour
+	samples, err := g.instant(ctx,
+		fmt.Sprintf("count_over_time(%s[%s])", MetricGPUUtil, promql.Range(probe)), end)
+	if err != nil || len(samples) == 0 {
+		return ScrapeInterval, false
+	}
+
+	best := 0.0
+	for _, s := range samples {
+		if s.Value > best {
+			best = s.Value
+		}
+	}
+	if best <= 1 {
+		return ScrapeInterval, false
+	}
+
+	raw := probe.Seconds() / best
+
+	// Snapped to a configured interval rather than used raw. count_over_time
+	// counts both endpoints, so an hour at 30s returns 121 points and divides
+	// out to 29.75s -- and a scrape period slightly *longer* than the truth
+	// inflates every coverage figure derived from it.
+	//
+	// Scrape intervals are configured, not continuous, so the nearest
+	// plausible value is the honest reading. The candidates are far enough
+	// apart that a few percent of probe error cannot move between them.
+	candidates := []time.Duration{
+		time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second,
+		15 * time.Second, 20 * time.Second, 30 * time.Second,
+		time.Minute, 2 * time.Minute, 5 * time.Minute,
+	}
+	best2, bestErr := time.Duration(0), math.MaxFloat64
+	for _, c := range candidates {
+		if e := math.Abs(c.Seconds()-raw) / c.Seconds(); e < bestErr {
+			best2, bestErr = c, e
+		}
+	}
+	// Nothing within a quarter of a plausible interval is not a scrape period,
+	// it is a broken probe: a recording rule, a partial final hour, or a
+	// series that started moments ago.
+	if best2 == 0 || bestErr > 0.25 {
+		return ScrapeInterval, false
+	}
+	return best2, true
+}
 
 // chunk is the sub-window each range aggregate is evaluated over.
 //
@@ -322,7 +388,7 @@ const chunk = 24 * time.Hour
 // question "was this ever non-zero in the window" is an aggregate, and asking
 // Prometheus for a fortnight of raw samples for every device to answer it in Go
 // would move tens of millions of samples for a few hundred booleans.
-func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *inventory.Inventory, start, end time.Time, step time.Duration) ([]inventory.Device, bool, []string, error) {
+func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *inventory.Inventory, start, end time.Time, step time.Duration) ([]inventory.Device, bool, []string, time.Duration, error) {
 	window := end.Sub(start)
 
 	// maxCovered is the fraction of the window the "was it ever non-zero"
@@ -332,10 +398,10 @@ func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *
 	// recommends deleting a busy GPU.
 	maxUtil, maxCovered, err := g.chunked(ctx, MetricGPUUtil, "max_over_time", schema, start, end, maxCombine)
 	if err != nil {
-		return nil, false, nil, err
+		return nil, false, nil, 0, err
 	}
 	if len(maxUtil) == 0 {
-		return nil, false, nil, promql.ErrNoSeries
+		return nil, false, nil, 0, promql.ErrNoSeries
 	}
 	// Power is averaged over a recent window rather than the whole one. The
 	// claim being corroborated is that the device is doing nothing *now*, and a
@@ -358,6 +424,10 @@ func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *
 	// that reason.
 	busyElsewhere := map[string]string{}
 	var checkedEngines []string
+
+	// How often samples actually arrive, rather than how often the exporter's
+	// default chart says they do.
+	scrape, _ := g.measureScrapeInterval(ctx, end)
 	for _, e := range otherEngines {
 		vals, covered, err := g.chunked(ctx, e.metric, "max_over_time", schema, start, end, maxCombine)
 		if err != nil || covered <= 0 || len(vals) == 0 {
@@ -381,7 +451,7 @@ func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *
 	avgPower, _ := g.instant(ctx, fmt.Sprintf("avg_over_time(%s[%s])", MetricPower, promql.Range(powerWindow)), end)
 	samples, _, err := g.chunked(ctx, MetricGPUUtil, "count_over_time", schema, start, end, sumCombine)
 	if err != nil && ctx.Err() != nil {
-		return nil, false, nil, ctx.Err()
+		return nil, false, nil, 0, ctx.Err()
 	}
 
 	// The sparkline and "when did work last happen" need shape, not precision,
@@ -424,7 +494,7 @@ func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *
 	// Expected sample count, used to tell a scrape gap from a genuine zero. An
 	// absent sample is not an idle sample, and conflating them is how a tool
 	// confidently reports that a device nobody was watching did nothing.
-	expected := window.Seconds() / ScrapeInterval.Seconds()
+	expected := window.Seconds() / scrape.Seconds()
 	if expected < 1 {
 		expected = 1
 	}
@@ -487,7 +557,7 @@ func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 
-	return out, len(avgPower) == 0, checkedEngines, nil
+	return out, len(avgPower) == 0, checkedEngines, scrape, nil
 }
 
 // refine fills in the parts of a device's statistics that need the shape of the
