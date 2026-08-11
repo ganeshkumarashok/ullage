@@ -98,6 +98,14 @@ func (c *Client) KarpenterNodePools(ctx context.Context) (*Karpenter, error) {
 				if !zeroNodeBudget(b.Nodes) {
 					continue
 				}
+				if !budgetBlocksReclaim(b.Reasons) {
+					// A budget scoped to reasons that have nothing to do with
+					// reclaiming an idle node does not hold it. Treating a
+					// Drifted-only budget as a pin suppresses the finding on
+					// exactly the clusters that configured Karpenter carefully
+					// enough to scope their budgets.
+					continue
+				}
 				if strings.TrimSpace(b.Schedule) == "" {
 					p.Pinned = true
 				} else {
@@ -122,4 +130,25 @@ func (c *Client) KarpenterNodePools(ctx context.Context) (*Karpenter, error) {
 func zeroNodeBudget(v string) bool {
 	v = strings.TrimSpace(v)
 	return v == "0" || v == "0%"
+}
+
+// budgetBlocksReclaim reports whether a disruption budget's reasons cover the
+// way Karpenter would remove an idle node.
+//
+// Karpenter disrupts for Underutilized, Empty and Drifted. Only the first two
+// are how an idle GPU node goes away; a budget scoped to Drifted pins node
+// replacement during an AMI rollout and says nothing about consolidation. An
+// empty reasons list means every reason, which is the common case and the one
+// that does hold.
+func budgetBlocksReclaim(reasons []string) bool {
+	if len(reasons) == 0 {
+		return true
+	}
+	for _, r := range reasons {
+		switch strings.ToLower(strings.TrimSpace(r)) {
+		case "underutilized", "empty":
+			return true
+		}
+	}
+	return false
 }
