@@ -159,6 +159,12 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 		oldestMeasured     bool
 		oldestCompleteness float64
 
+		// Whether the node whose duration is being reported produced any
+		// utilization series at all. Without one, the duration is not a weak
+		// measurement -- it is not a measurement, and the accelerator-hours
+		// and the cost derived from it are inference presented as observation.
+		oldestAnySeries bool
+
 		// Whether the pool's coverage is uniform, which is worth saying out
 		// loud when it is not.
 		anyMeasured   bool
@@ -221,6 +227,7 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 		// that gets a tool disbelieved on the number the reader can check.
 		empty := node.Age
 		nodeMeasured := false
+		anySeries := false
 		completeness := 0.0
 		// Every accelerator on the node has to have been observed before the
 		// trailing zero run counts as a measurement of the node: three GPUs
@@ -238,10 +245,13 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 		// `<=` and not `<`: when the measurement and the age agree on the
 		// number, the number is still backed by a measurement, and the
 		// stronger provenance is the true one.
-		if w, seen := lastWork[node.Name]; seen && w.covered >= want && w.since <= empty {
-			empty = w.since
-			nodeMeasured = true
-			completeness = w.completeness
+		if w, seen := lastWork[node.Name]; seen {
+			anySeries = w.covered > 0
+			if w.covered >= want && w.since <= empty {
+				empty = w.since
+				nodeMeasured = true
+				completeness = w.completeness
+			}
 		}
 		if nodeMeasured {
 			agg.anyMeasured = true
@@ -254,6 +264,7 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 			agg.oldestNode = node.Name
 			agg.oldestMeasured = nodeMeasured
 			agg.oldestCompleteness = completeness
+			agg.oldestAnySeries = anySeries
 		}
 
 		for _, pod := range cl.PodsOnNode(node.Name) {
@@ -319,7 +330,7 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 			},
 			Devices:    nodeDeviceIDs(cl, agg.nodes),
 			Fallow:     fallow,
-			Confidence: api.EvidenceHigh,
+			Confidence: durationConfidence(agg.oldestMeasured, agg.oldestAnySeries),
 			Evidence: api.Evidence{
 				Window:             api.ISODuration(cl.Window),
 				FallowDuration:     api.ISODuration(fallow),
@@ -358,19 +369,59 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 				f.Evidence.Notes = append(f.Evidence.Notes,
 					"a scheduled disruption budget applies to this NodePool; ullage does not evaluate "+
 						"cron windows, so consolidation may simply be paused")
-				f.Confidence = api.EvidenceMedium
+				f.Confidence = atMost(f.Confidence, api.EvidenceMedium)
 			}
 		} else if cl.Autoscaler == nil {
 			// Absence of autoscaler status is unknown, never permission. Saying
 			// so is the difference between a cautious tool and a reckless one.
 			f.Evidence.Notes = append(f.Evidence.Notes,
 				"no autoscaler status was readable, so a deliberate minimum size cannot be ruled out")
-			f.Confidence = api.EvidenceMedium
+			f.Confidence = atMost(f.Confidence, api.EvidenceMedium)
 		}
 
 		out = append(out, f)
 	}
 	return out, nil
+}
+
+// atMost caps a confidence, so that a caveat can only ever lower it.
+//
+// Two independent doubts are expressed through this one field -- how well the
+// duration is evidenced, and whether the autoscaler's intent could be read --
+// and they are written in that order. Plain assignment let the second one
+// promote a duration that was never measured up to medium.
+func atMost(current, cap string) string {
+	rank := map[string]int{api.EvidenceLow: 1, api.EvidenceMedium: 2, api.EvidenceHigh: 3}
+	if rank[cap] < rank[current] {
+		return cap
+	}
+	return current
+}
+
+// durationConfidence rates the reported fallow duration, not the emptiness.
+//
+// That the pool holds no accelerator workload is read from the API server and
+// is not in doubt. How long that has been true is a different claim with
+// different provenance, and it is the one that gets multiplied by a price and
+// printed as money.
+//
+// A node whose accelerators produced no series at all has an unmeasured
+// duration: the age is an upper bound on how long it *could* have been empty.
+// An exporter that was never installed on one node would otherwise turn "empty
+// right now" into "wasted for a fortnight" at full confidence. Rating that low
+// puts it under the default floor, so it has to be asked for -- which is the
+// right trade for a number that cannot be checked.
+func durationConfidence(measured, anySeries bool) string {
+	switch {
+	case measured:
+		return api.EvidenceHigh
+	case anySeries:
+		// Some accelerators on the node were observed but not all of them, so
+		// there is partial evidence behind the age.
+		return api.EvidenceMedium
+	default:
+		return api.EvidenceLow
+	}
 }
 
 func nodeDeviceIDs(cl *inventory.Cluster, nodes []string) []string {

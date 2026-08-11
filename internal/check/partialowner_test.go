@@ -132,3 +132,49 @@ func TestStuckPodWillNotOfferToStopServingReplicas(t *testing.T) {
 			"and take down the replica that is serving traffic")
 	}
 }
+
+// A node whose accelerators never reported is empty *now*; how long it has been
+// empty is not something the evidence says.
+//
+// The check falls back to node age for the duration, which is right as an upper
+// bound and wrong as a measurement, because that duration is multiplied by a
+// price and printed as money. An exporter that was never installed on one node
+// would otherwise turn "nothing is scheduled here at this instant" into "you
+// wasted a fortnight of H100 time", at full confidence, with a command to
+// delete the pool attached.
+func TestUnusedNodeWillNotPriceAnUnmeasuredNodeConfidently(t *testing.T) {
+	nodes := []inventory.NodeView{
+		{Name: "gpu-9", Pool: "gpu-h100", Accelerators: 8, Ready: true, Age: 20 * 24 * time.Hour},
+	}
+
+	// No devices at all: the exporter is missing from this node.
+	got := find(t, check.UnusedNode{}, cluster(nil, nil, nodes))
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want 1 — the node really is empty and that is worth saying", len(got))
+	}
+	if got[0].Confidence != api.EvidenceLow {
+		t.Fatalf("Confidence = %q for a node with no utilization series at all; the reported "+
+			"%s of fallow is the node's age, not a measurement, and at medium or above it is "+
+			"shown by default and priced as though it had been observed",
+			got[0].Confidence, got[0].Fallow)
+	}
+}
+
+// The downgrade must not become an upgrade. Two different doubts are written to
+// the same confidence field, and the autoscaler one is written second.
+func TestUnusedNodeCaveatsOnlyEverLowerConfidence(t *testing.T) {
+	nodes := []inventory.NodeView{
+		{Name: "gpu-9", Pool: "gpu-h100", Accelerators: 8, Ready: true, Age: 20 * 24 * time.Hour},
+	}
+	cl := cluster(nil, nil, nodes)
+	cl.Autoscaler = nil // unreadable autoscaler status, which appends its own caveat
+
+	got := find(t, check.UnusedNode{}, cl)
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want 1", len(got))
+	}
+	if got[0].Confidence != api.EvidenceLow {
+		t.Fatalf("Confidence = %q: an unmeasured duration plus an unreadable autoscaler is two "+
+			"reasons to doubt the finding, and it came out more confident than either", got[0].Confidence)
+	}
+}

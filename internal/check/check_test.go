@@ -401,9 +401,19 @@ func TestUnusedNodeUnderKarpenter(t *testing.T) {
 	nodes := []inventory.NodeView{
 		{Name: "gpu-0", Pool: "gpu-a10", Accelerators: 4, Ready: true, Age: 20 * 24 * time.Hour},
 	}
+	// Every accelerator on the node reports, and reports zero. Without series
+	// the duration would be the node's age rather than a measurement, and the
+	// finding would be rated low for that reason alone -- which is correct
+	// behaviour, but it is not what these subtests are about.
+	measured := []inventory.Device{
+		device("gpu-0-0", "gpu-0", "gpu-a10", nil, idleStats(window, false)),
+		device("gpu-0-1", "gpu-0", "gpu-a10", nil, idleStats(window, false)),
+		device("gpu-0-2", "gpu-0", "gpu-a10", nil, idleStats(window, false)),
+		device("gpu-0-3", "gpu-0", "gpu-a10", nil, idleStats(window, false)),
+	}
 
 	t.Run("an unconsolidated empty node is a stronger finding, not a hedged one", func(t *testing.T) {
-		cl := cluster(nil, nil, nodes)
+		cl := cluster(measured, nil, nodes)
 		cl.Autoscaler = &inventory.AutoscalerView{Kind: "karpenter", Pinned: map[string]bool{}}
 
 		got := find(t, check.UnusedNode{}, cl)
@@ -421,7 +431,7 @@ func TestUnusedNodeUnderKarpenter(t *testing.T) {
 	})
 
 	t.Run("a zero-node disruption budget is Karpenter's floor", func(t *testing.T) {
-		cl := cluster(nil, nil, nodes)
+		cl := cluster(measured, nil, nodes)
 		cl.Autoscaler = &inventory.AutoscalerView{
 			Kind:   "karpenter",
 			Pinned: map[string]bool{"gpu-a10": true},
@@ -438,7 +448,7 @@ func TestUnusedNodeUnderKarpenter(t *testing.T) {
 	})
 
 	t.Run("a scheduled hold is context, not a conclusion", func(t *testing.T) {
-		cl := cluster(nil, nil, nodes)
+		cl := cluster(measured, nil, nodes)
 		cl.Autoscaler = &inventory.AutoscalerView{
 			Kind:      "karpenter",
 			Pinned:    map[string]bool{},
