@@ -24,7 +24,11 @@ help: ## Show this help
 
 .PHONY: demo
 demo: build ## See what ullage does, with no cluster and no GPU
-	$(BIN) demo
+	@# A scan that finds something exits 1, which is what makes it usable as a CI
+	@# gate -- but it also made the first command in the README print
+	@# "make: *** [demo] Error 1" under a perfectly good demo. Findings are the
+	@# expected outcome here; a scan that could not run (exit 2) is still a failure.
+	@$(BIN) demo || [ $$? -eq 1 ]
 
 .PHONY: tour
 tour: build ## A narrated two-minute walkthrough of the whole idea
@@ -83,7 +87,19 @@ vet: ## Run go vet
 
 .PHONY: vuln
 vuln: ## Check dependencies for known vulnerabilities
-	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+	@# This project has one dependency, so almost everything govulncheck reports
+	@# is the Go standard library, and the fix for those is always "build with a
+	@# newer patch release" rather than a change here. Say that, instead of
+	@# leaving a contributor to read a dozen advisories and conclude the project
+	@# is unsafe.
+	@go run golang.org/x/vuln/cmd/govulncheck@latest ./... || { \
+		status=$$?; \
+		echo; \
+		echo "You are building with $$(go env GOVERSION)."; \
+		echo "Every finding above whose 'Found in' line ends @$$(go env GOVERSION) is"; \
+		echo "your toolchain, not this project -- install the current Go release and"; \
+		echo "re-run. Anything naming a module from go.mod is ours to fix."; \
+		exit $$status; }
 
 # The checks that only ever fail when the tool is run the way a user runs it.
 # Both of the bugs this catches shipped past a green unit suite.
@@ -121,6 +137,9 @@ print("  contract ok, %d findings" % len(r["recommendations"]))'
 			&& { echo "examples/ci-gate.sh should fail under a \$$1 budget"; exit 1; }; \
 		echo "  examples ok"; \
 	else echo "  jq absent, skipped the two JSON examples"; fi
+	@echo "==> the first command in the README exits clean"
+	@$(MAKE) --no-print-directory demo >/dev/null \
+		|| { echo "make demo failed -- that is the first thing anyone types"; exit 1; }
 	@echo "all smoke checks passed"
 
 .PHONY: check
