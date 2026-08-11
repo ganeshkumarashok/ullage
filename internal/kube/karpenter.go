@@ -2,6 +2,7 @@ package kube
 
 import (
 	"context"
+	"errors"
 	"strings"
 )
 
@@ -84,7 +85,8 @@ func (c *Client) KarpenterNodePools(ctx context.Context) (*Karpenter, error) {
 			if isNotFound(err, &nf) {
 				continue
 			}
-			if _, ok := err.(*Forbidden); ok {
+			var forbidden *Forbidden
+			if errors.As(err, &forbidden) {
 				continue
 			}
 			return nil, err

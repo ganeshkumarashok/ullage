@@ -18,6 +18,7 @@ import (
 	"github.com/ullage-project/ullage/internal/check"
 	"github.com/ullage-project/ullage/internal/config"
 	"github.com/ullage-project/ullage/internal/demo"
+	"github.com/ullage-project/ullage/internal/humanize"
 	"github.com/ullage-project/ullage/internal/pricing"
 	"github.com/ullage-project/ullage/internal/render"
 	"github.com/ullage-project/ullage/pkg/ullage"
@@ -59,6 +60,27 @@ Exit codes:
   1  findings present
   2  the scan could not be completed
 `
+
+// durationValue accepts the units the help text advertises. Go's own duration
+// flag stops at hours, so `--window 14d` — the default this tool prints — is a
+// parse error, and the first command anyone copies out of the README fails.
+type durationValue struct{ d *time.Duration }
+
+func (v *durationValue) String() string {
+	if v == nil || v.d == nil || *v.d == 0 {
+		return ""
+	}
+	return humanize.Duration(*v.d)
+}
+
+func (v *durationValue) Set(s string) error {
+	d, err := humanize.ParseDuration(s)
+	if err != nil {
+		return err
+	}
+	*v.d = d
+	return nil
+}
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -169,12 +191,13 @@ func newFlags(name string) *flags {
 	f.fs.StringVar(&f.promPass, "prometheus-password", "", "basic auth password")
 	f.fs.Var(&f.promHeader, "prometheus-header", "extra header, Key=Value (repeatable)")
 	f.fs.BoolVar(&f.insecure, "insecure-skip-tls-verify", false, "skip TLS verification")
-	f.fs.DurationVar(&f.timeout, "timeout", 60*time.Second, "per-query timeout")
+	f.timeout = 60 * time.Second
+	f.fs.Var(&durationValue{&f.timeout}, "timeout", "per-query timeout")
 
-	f.fs.DurationVar(&f.window, "window", 0, "analysis window (default 336h)")
-	f.fs.DurationVar(&f.idle, "idle-threshold", 0, "minimum idle duration to report (default 24h)")
-	f.fs.DurationVar(&f.stuck, "stuck-threshold", 0, "minimum stuck duration to report (default 1h)")
-	f.fs.DurationVar(&f.step, "step", 0, "range query resolution (default 1h)")
+	f.fs.Var(&durationValue{&f.window}, "window", "analysis window (default 14d)")
+	f.fs.Var(&durationValue{&f.idle}, "idle-threshold", "minimum idle duration to report (default 24h)")
+	f.fs.Var(&durationValue{&f.stuck}, "stuck-threshold", "minimum stuck duration to report (default 1h)")
+	f.fs.Var(&durationValue{&f.step}, "step", "range query resolution (default 1h)")
 	f.fs.StringVar(&f.minConfidence, "min-confidence", "", "high | medium | low (default medium)")
 	f.fs.Var(&f.namespaces, "namespace", "restrict to a namespace (repeatable)")
 	f.fs.StringVar(&f.checks, "checks", "", "comma-separated check IDs")

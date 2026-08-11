@@ -266,15 +266,53 @@ func (c *Client) Server() string { return c.server }
 
 // Forbidden reports whether an error was an RBAC denial, so partial permissions
 // degrade into a warning rather than a failure.
-type Forbidden struct{ Path string }
+type Forbidden struct {
+	Path string
+	// Message is the API server's own explanation. RBAC is the single most
+	// common thing to go wrong when someone first runs this against a real
+	// cluster, and the server's message names the verb, the resource and the
+	// identity — everything needed to write the missing rule. Discarding it
+	// leaves the user with "forbidden" and nowhere to go.
+	Message string
+}
 
-func (e *Forbidden) Error() string { return "forbidden: " + e.Path }
+func (e *Forbidden) Error() string {
+	if e.Message != "" {
+		return "forbidden: " + e.Path + ": " + e.Message
+	}
+	return "forbidden: " + e.Path
+}
 
 // NotFound reports an absent API, which is how optional resources (DRA, PDBs)
 // are probed without treating their absence as breakage.
-type NotFound struct{ Path string }
+type NotFound struct {
+	Path    string
+	Message string
+}
 
-func (e *NotFound) Error() string { return "not found: " + e.Path }
+func (e *NotFound) Error() string {
+	if e.Message != "" {
+		return "not found: " + e.Path + ": " + e.Message
+	}
+	return "not found: " + e.Path
+}
+
+// statusMessage pulls the human-readable line out of a Kubernetes Status
+// object. A body that is not a Status — an ingress error page, say — yields
+// nothing rather than noise.
+func statusMessage(r io.Reader) string {
+	var st struct {
+		Kind    string `json:"kind"`
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r, 8192)).Decode(&st); err != nil {
+		return ""
+	}
+	if st.Kind != "Status" {
+		return ""
+	}
+	return strings.TrimSpace(st.Message)
+}
 
 func (c *Client) get(ctx context.Context, path string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.server+path, nil)
@@ -294,9 +332,9 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusForbidden, http.StatusUnauthorized:
-		return &Forbidden{Path: path}
+		return &Forbidden{Path: path, Message: statusMessage(resp.Body)}
 	case http.StatusNotFound:
-		return &NotFound{Path: path}
+		return &NotFound{Path: path, Message: statusMessage(resp.Body)}
 	default:
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		return fmt.Errorf("GET %s: %s: %s", path, resp.Status, strings.TrimSpace(string(body)))

@@ -62,6 +62,9 @@ func (c IdlePod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Ra
 		pods    []inventory.PodRef
 		devices []inventory.Device
 		fallow  time.Duration
+		// The coverage the gate actually judged, carried so the report prints
+		// the number it decided on rather than a differently-derived one.
+		completeness float64
 	}
 	groups := map[string]*group{}
 	order := []string{}
@@ -104,6 +107,13 @@ func (c IdlePod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Ra
 				idle = false
 				break
 			}
+			// A series that stopped arriving is not a device reading zero, it
+			// is a device nobody is watching. Treating the two alike turns a
+			// dead exporter into a cluster-wide deletion recommendation.
+			if d.Util.Stale {
+				idle = false
+				break
+			}
 			since, ok := d.Util.FallowFor(cl.Now)
 			if !ok {
 				idle = false
@@ -136,9 +146,12 @@ func (c IdlePod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Ra
 		key := groupKeyFor(pod)
 		g, ok := groups[key]
 		if !ok {
-			g = &group{}
+			g = &group{completeness: 1}
 			groups[key] = g
 			order = append(order, key)
+		}
+		if completeness < g.completeness {
+			g.completeness = completeness
 		}
 		g.pods = append(g.pods, pod.Ref)
 		g.devices = append(g.devices, devs...)
@@ -154,7 +167,7 @@ func (c IdlePod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Ra
 		sort.Slice(g.pods, func(i, j int) bool { return g.pods[i].Name < g.pods[j].Name })
 
 		pod := podByRef(cl, g.pods[0])
-		ev, conf := summariseIdle(g.devices, cl.Window, g.fallow)
+		ev, conf := summariseIdle(g.devices, cl.Window, g.fallow, g.completeness)
 
 		subject := Subject{
 			Kind:      "workload",
@@ -178,20 +191,21 @@ func (c IdlePod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Ra
 
 // summariseIdle folds a group's devices into one evidence record and decides
 // how much to trust it.
-func summariseIdle(devices []inventory.Device, window, fallow time.Duration) (api.Evidence, string) {
+// summariseIdle takes completeness rather than deriving it, because the caller
+// measured coverage over the pod's own lifetime and that is the number the
+// finding was judged on. Recomputing it here against the scan window instead
+// printed "0.4% coverage" beside a claim that had just passed an 80% gate.
+func summariseIdle(devices []inventory.Device, window, fallow time.Duration, completeness float64) (api.Evidence, string) {
 	ev := api.Evidence{
 		Window:             api.ISODuration(window),
 		FallowDuration:     api.ISODuration(fallow),
-		SampleCompleteness: 1,
+		SampleCompleteness: completeness,
 	}
 	powerSum, powerN := 0.0, 0
 	tdp := 0.0
 	for _, d := range devices {
 		if d.Util.Max > ev.UtilizationMax {
 			ev.UtilizationMax = d.Util.Max
-		}
-		if d.Util.Completeness < ev.SampleCompleteness {
-			ev.SampleCompleteness = d.Util.Completeness
 		}
 		if d.Util.LastNonZero != nil && (ev.LastNonZeroUtilization == nil || d.Util.LastNonZero.After(*ev.LastNonZeroUtilization)) {
 			ev.LastNonZeroUtilization = d.Util.LastNonZero

@@ -90,6 +90,12 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 		if d.Util.Samples == 0 {
 			continue
 		}
+		// A series that stopped reporting cannot vouch for the present, in
+		// either direction: it neither proves work nor proves idleness. Skip
+		// it, which leaves the node on the weaker node-age path.
+		if d.Util.Stale {
+			continue
+		}
 
 		var since time.Duration
 		if d.Util.Max > 0 {

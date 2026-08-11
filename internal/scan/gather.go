@@ -103,6 +103,7 @@ func (g *Gatherer) Gather(ctx context.Context, opts Options) (*inventory.Cluster
 		Step:              ScrapeInterval,
 		Devices:           devices,
 		MetricsAttributed: schema.Found,
+		PodLabelSchema:    schema.Pod,
 	}
 
 	// Who decides whether an empty node stays? nil means nobody could be
@@ -283,9 +284,15 @@ func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *
 		g.queries = append(g.queries, fmt.Sprintf("%s @ range %s..%s step %s",
 			MetricGPUUtil, start.Format(time.RFC3339), end.Format(time.RFC3339), step))
 	}
+	// Keyed by series, not by device. A GPU held by two pods inside the window
+	// returns a series per holder, so a device-keyed map keeps whichever one
+	// happened to be decoded last and then hands that shape to *every* record
+	// for the card. Observed live: a finished job's stale series overwrote the
+	// running job's, and a GPU sitting at 78% was reported as having done no
+	// work since the window began.
 	shapeBy := map[string]promql.Series{}
 	for _, s := range shape {
-		shapeBy[deviceKey(s.Labels)] = s
+		shapeBy[seriesKey(s.Labels, schema)] = s
 	}
 	powerBy := map[string]float64{}
 	for _, s := range avgPower {
@@ -346,7 +353,7 @@ func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *
 			Completeness:   clamp(samplesBy[key]/expected, 0, 1),
 			Samples:        int(seriesSamplesBy[seriesKey(s.Labels, schema)]),
 		}
-		if series, ok := shapeBy[key]; ok {
+		if series, ok := shapeBy[seriesKey(s.Labels, schema)]; ok {
 			refine(&d.Util, series, start, end, step)
 		}
 		if watts, ok := powerBy[key]; ok {
@@ -363,6 +370,14 @@ func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *
 // series rather than a single aggregate.
 func refine(st *inventory.Stats, s promql.Series, start, end time.Time, step time.Duration) {
 	sum := promql.Summarise(s, start, end, step, 14)
+	if n := len(s.Samples); n > 0 {
+		last := s.Samples[n-1].T
+		st.LastSample = &last
+		// Three resolutions of slack absorbs a delayed scrape and the
+		// alignment of the range grid; beyond that the series has stopped,
+		// and a stopped series says nothing about the present.
+		st.Stale = end.Sub(last) > 3*step
+	}
 	st.Buckets = sum.Buckets
 	st.Mean = sum.Mean
 	st.LastNonZero = sum.LastNonZero

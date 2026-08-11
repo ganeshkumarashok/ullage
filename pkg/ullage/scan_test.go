@@ -3,6 +3,8 @@ package ullage_test
 import (
 	"context"
 	"encoding/json"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -345,4 +347,98 @@ func TestListFieldsAreNeverNull(t *testing.T) {
 				"cluster where the list is empty", k)
 		}
 	}
+
+	// Enumerating the top level by hand only catches the lists someone
+	// remembered. Walk the whole document instead: `scan.params.checks`
+	// shipped as null precisely because it is nested and appears only on the
+	// default invocation, which is the one nobody runs in a test.
+	var doc any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	var walk func(path string, v any)
+	walk = func(path string, v any) {
+		switch t2 := v.(type) {
+		case map[string]any:
+			for k, child := range t2 {
+				p := k
+				if path != "" {
+					p = path + "." + k
+				}
+				walk(p, child)
+			}
+		case []any:
+			for _, child := range t2 {
+				walk(path+"[]", child)
+			}
+		}
+	}
+	walk("", doc)
+
+	// A null anywhere is only detectable against the declared shape, so check
+	// every declared slice field is present and non-null.
+	for path, isSlice := range sliceFields(reflect.TypeOf(res), "") {
+		if !isSlice {
+			continue
+		}
+		if got := lookup(doc, path); got == nil {
+			t.Errorf("%q serialised as null; every list in the contract must be [] when "+
+				"empty, or a consumer that asks for its length crashes", path)
+		}
+	}
+}
+
+// sliceFields reports the JSON path of every slice-typed field in the contract.
+func sliceFields(t reflect.Type, prefix string) map[string]bool {
+	out := map[string]bool{}
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return out
+	}
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		tag := strings.Split(f.Tag.Get("json"), ",")[0]
+		if tag == "" || tag == "-" {
+			continue
+		}
+		path := tag
+		if prefix != "" {
+			path = prefix + "." + tag
+		}
+		ft := f.Type
+		for ft.Kind() == reflect.Pointer {
+			ft = ft.Elem()
+		}
+		switch ft.Kind() {
+		case reflect.Slice:
+			out[path] = true
+		case reflect.Struct:
+			if ft.String() == "time.Time" {
+				continue
+			}
+			for k, v := range sliceFields(ft, path) {
+				out[k] = v
+			}
+		}
+	}
+	return out
+}
+
+// lookup walks a dotted path through decoded JSON, returning nil for a null.
+func lookup(doc any, path string) any {
+	cur := doc
+	for _, part := range strings.Split(path, ".") {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return struct{}{} // not reachable on this document; not a null
+		}
+		v, present := m[part]
+		if !present {
+			return struct{}{}
+		}
+		cur = v
+	}
+	return cur
 }

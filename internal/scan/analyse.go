@@ -84,8 +84,12 @@ func Analyse(ctx context.Context, cl *inventory.Cluster, inv *inventory.Inventor
 				StuckThreshold: api.ISODuration(opts.StuckThreshold),
 				MinConfidence:  opts.MinConfidence,
 				Step:           api.ISODuration(opts.Step),
-				Checks:         opts.Checks,
+				// Never nil: a JSON null here is a crash in any consumer that
+				// asks for its length, and it appears only on the default
+				// invocation — the one nobody tests against.
+				Checks: append([]string{}, opts.Checks...),
 			},
+			PodLabelSchema:       cl.PodLabelSchema,
 			AcceleratorsObserved: inv.Observed,
 			AcceleratorsAnalyzed: inv.Analyzed,
 			AllocationModels:     inv.Counts,

@@ -2,6 +2,7 @@ package kube
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 
@@ -61,7 +62,8 @@ func (c *Client) ClusterAutoscalerStatus(ctx context.Context) (*AutoscalerStatus
 		if _, ok := err.(*NotFound); ok {
 			return nil, nil
 		}
-		if _, ok := err.(*Forbidden); ok {
+		var forbidden *Forbidden
+		if errors.As(err, &forbidden) {
 			return nil, nil
 		}
 		return nil, err

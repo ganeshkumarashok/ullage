@@ -382,12 +382,18 @@ type PodDisruptionBudget struct {
 // does not cover a pod when it does, which turns a blocked scale-down into a
 // recommendation to scale down.
 type LabelSelector struct {
-	MatchLabels      map[string]string `json:"matchLabels"`
-	MatchExpressions []struct {
-		Key      string   `json:"key"`
-		Operator string   `json:"operator"`
-		Values   []string `json:"values"`
-	} `json:"matchExpressions"`
+	MatchLabels      map[string]string          `json:"matchLabels"`
+	MatchExpressions []LabelSelectorRequirement `json:"matchExpressions"`
+}
+
+// LabelSelectorRequirement is the set-based half of a selector. ullage does not
+// evaluate these; it reports that it could not, which is why the type is named
+// rather than anonymous — an unevaluated selector is a fact a caller has to be
+// able to talk about.
+type LabelSelectorRequirement struct {
+	Key      string   `json:"key"`
+	Operator string   `json:"operator"`
+	Values   []string `json:"values"`
 }
 
 // Matches reports whether a label set satisfies the selector, and whether the
