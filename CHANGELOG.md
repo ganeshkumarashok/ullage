@@ -166,3 +166,63 @@ deleting hardware that was in use.
 - `.ullage.yaml` is written by `ignore` but still never read.
 - A second metric source (AMD `device-metrics-exporter`) to make the
   vendor-neutral fact layer true in practice rather than only in structure.
+
+## Review round 3 — the fix that reopened the bug it closed
+
+**Goal.** Verify the previous round's fixes held at the cause, and close the
+`ullage ignore` loop, which wrote a file nothing read.
+
+**Findings.**
+
+- **C2 was not fixed, only relocated.** The fallow duration no longer came from
+  node age, but the replacement had no sample-coverage gate. One zero sample out
+  of a fortnight set the node's idle run to the whole window, and the evidence
+  then called that number *measured*. Any node that joined mid-window, or whose
+  dcgm-exporter had restarted, produced a 14-day idleness claim at high
+  confidence with a scale-to-zero command attached — the same overstatement,
+  reached by a different route. Sample coverage is what makes a zero mean
+  anything.
+- The `lastWork` map mixed two combination rules: minimum for devices that had
+  worked, first-wins for devices that had not. Three idle GPUs could outvote a
+  working one. Rewritten so the per-node answer is unambiguously the minimum.
+- **One metric series is not one accelerator.** dcgm-exporter labels utilization
+  with the pod holding the device, so a GPU handed to a second pod during the
+  window returns two series — ordinary job churn at 14 days. The census counted
+  records, so it would have reported analysing more accelerators than the
+  cluster has. The honest denominator is the single claim the whole tool rests
+  on.
+- **The demo could not reproduce that bug**, because its series were keyed by
+  host and GPU index, making churn structurally unrepresentable. The fixture was
+  green on a defect that fires on any real cluster with turnover. Fixed by
+  making the series a slice and adding a finished job to the scenario; reverting
+  the census fix now makes the demo print 61 + 8 = 69 against 68 observed.
+
+**Failed attempts.**
+
+- Deduplicating `cl.Devices` itself, as first suggested. It breaks idle-pod:
+  collapsing a busy pod-A series and an idle pod-B series onto one physical
+  device makes pod B's genuine idleness invisible. Per-series records are
+  correct for attribution; only the census collapses them.
+- Writing the completeness gate as a patch to the idle branch. The surrounding
+  min/first-wins mix was itself incoherent, so the whole loop was rewritten.
+
+**Suppressions.** `ullage ignore` wrote a `.ullage.yaml` that nothing ever
+opened, and `explain` printed the command with a workload reference while
+matching is on the finding id — so copying the tool's own advice produced an
+entry that could never match. Both halves were broken in a way that looked like
+it worked. Now: unmatched entries are reported, expired entries stop applying
+and are named, malformed files are a hard error, and the suppressed total prints
+with its accelerator-hours and cost so suppression cannot quietly hide waste.
+
+Also found by writing a three-line consumer of the JSON: list fields serialised
+as `null` rather than `[]`, which would have broken consumers only on clusters
+healthy enough to have no suppressions and no warnings — never in a demo.
+
+**Files changed.** `internal/check/unusednode.go`, `internal/scan/gather.go`,
+`internal/scan/fix.go`, `internal/scan/analyse.go`, `internal/inventory/facts.go`,
+`internal/render/{explain,table,printer}.go`, `internal/demo/{server,scenario}.go`,
+new `internal/config/`, `cmd/ullage/main.go`, `pkg/ullage/ullage.go`, `README.md`,
+tests in `internal/check`, `internal/config`, `pkg/ullage`.
+
+**Next step.** A JSON Schema and golden test over `pkg/ullage/api`; nothing
+currently pins the contract's shape, so a rename breaks embedders silently.
