@@ -226,3 +226,89 @@ tests in `internal/check`, `internal/config`, `pkg/ullage`.
 
 **Next step.** A JSON Schema and golden test over `pkg/ullage/api`; nothing
 currently pins the contract's shape, so a rename breaks embedders silently.
+
+## Testing round — deep unit tests and a live cluster
+
+### Goal
+
+Prove the tool works rather than assert it: real unit tests for the packages
+that had none, then an end-to-end run against a real AKS cluster with a real
+Prometheus.
+
+### Findings
+
+The E2E run was not a formality. It found five bugs that the unit suite and the
+demo fixture both missed, because all three agreed on assumptions the real
+world does not share.
+
+- **`--window 14d` was a parse error.** The tool's own documented default,
+  printed in the README and `--help`. `time.ParseDuration` has no `d` unit, so
+  the first command anyone copies off the front page failed. No unit test
+  caught it because no unit test types a flag.
+- **A GPU at 78% utilization was reported as idle.** Two causes. `shapeBy` was
+  keyed by device while the series it stores are per-holder, so last-write-wins
+  let a stale series overwrite a running job's shape. And `FallowFor` believed
+  the range query while ignoring `Max` from the aggregate: at a 14-day window
+  the range query exceeded Prometheus's point limit, the shape came back
+  without its non-zero samples, and the finding printed "peak utilization 78%"
+  inside its own evidence for a device it had just called idle.
+- **Cross-node attribution.** dcgm-exporter stamps the holder onto the series,
+  the series lingers after the holder leaves, and pod names repeat constantly
+  under StatefulSets and Jobs. `DevicesOf` matched on namespace and name alone,
+  so a finished job's device was attributed to a running namesake elsewhere.
+- **Idle-pod printed a coverage figure it had not judged**, so a claim that
+  cleared an 80% gate was published beside "0.4% coverage".
+- **`podLabelSchema` was declared in the contract and never assigned**, and
+  `scan.params.checks` serialised as `null` on the default invocation.
+
+Writing tests found two more, both in code deciding whether capacity is
+deliberate:
+
+- **`containsPool` matched `-gpu` against `aks-gpubig-1-vmss`.** The delimiter
+  was required on one side only, so pool `gpu` absorbed unrelated pool
+  `gpubig`'s node groups and summed its floor — overstating the reservation and
+  hiding real waste, the exact failure the matching exists to prevent.
+- **`chunked` built its own identity key**, without a separator or the
+  namespace, merging `team-a/trainer` and `team-b/trainer` on one card and
+  summing one team's sample count into the other's coverage.
+
+### The assumption underneath most of them
+
+A series that stops arriving is not a device reading zero; it is a device
+nobody is watching. An exporter that dies, a node that leaves, or a holder
+label that stops being emitted otherwise all present as hardware that has been
+perfectly idle ever since — the monitoring breaking generates a recommendation
+to delete GPUs. `Stats` now records `LastSample` and `Stale`, `idle-pod`
+refuses stale devices, and `unused-node` falls through to the weaker node-age
+path rather than claiming a measurement it does not have.
+
+### Failed attempts
+
+- A regression test for the young-pod blind spot used a 2-day pod and passed
+  for the wrong reason: the coverage gate was the reported problem, but the
+  test `IdleThreshold` is 72h, so the real blind spot is pods aged 3–11 days.
+- An `httptest` handler blocking on `r.Context().Done()` deadlocked `srv.Close()`,
+  which waits for outstanding requests. Tests now use a `release` channel closed
+  before the server closes.
+- Enumerating the contract's list fields by hand missed the nested one. The test
+  now walks the whole document against the declared struct shape, which is how
+  `scan.params.checks` was found.
+
+### Verification
+
+Every fix was reverted temporarily to confirm its test failed. All of them did.
+
+### Files changed
+
+`internal/promql/client.go`, `internal/inventory/facts.go`,
+`internal/scan/gather.go`, `internal/scan/analyse.go`,
+`internal/check/{idlepod,unusednode}.go`, `internal/kube/{client,autoscaler,karpenter,types}.go`,
+`internal/humanize/duration_flag.go`, `cmd/ullage/main.go`,
+plus new tests for `promql`, `kube`, `inventory`, `scan` and the contract, and
+`e2e/` holding the environment that found the five bugs.
+
+### Next
+
+Tests for `internal/render` and `internal/demo`; the three open reviewer minors
+(Karpenter NodePool name in `fix.go`, `KnownFields` forward-compatibility in
+`config.go`, oscillating suppression warnings).
