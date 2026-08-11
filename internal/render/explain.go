@@ -33,7 +33,17 @@ func Explain(w io.Writer, f *api.Finding, res *api.Result, o Options) error {
 	} else {
 		p.field("Last GPU work", "none within the window")
 	}
-	p.field("Peak utilization", "%.0f%% over the whole window", f.Evidence.UtilizationMax)
+	// The peak is over the whole window; the zero claim is over the trailing
+	// fallow run. Printing "peak 100%" three lines above "read exactly zero"
+	// with no qualifier reads as a contradiction, and a reader who catches a
+	// tool contradicting itself stops believing the rest of the screen — which
+	// is the entire cost of getting this wording wrong.
+	if f.Evidence.UtilizationMax > 0 && f.Evidence.LastNonZeroUtilization != nil {
+		p.field("Peak utilization", "%.0f%% — reached before the fallow period began, not during it",
+			f.Evidence.UtilizationMax)
+	} else {
+		p.field("Peak utilization", "%.0f%% across the whole window", f.Evidence.UtilizationMax)
+	}
 	if f.Evidence.PowerDrawWatts > 0 {
 		if f.Evidence.PowerDrawTDPRatio > 0 {
 			p.field("Power draw", "%.0f W mean (%.0f%% of %.0f W TDP)",
@@ -47,7 +57,7 @@ func Explain(w io.Writer, f *api.Finding, res *api.Result, o Options) error {
 	if len(f.Evidence.Sparkline) > 0 {
 		p.line("")
 		p.field("Utilization", "%s", sparkline(f.Evidence.Sparkline))
-		p.dim("               %s", sparkAxis(f.Evidence.Sparkline, f.Evidence.Window.Duration()))
+		p.dim("                 %s", sparkAxis(f.Evidence.Sparkline, f.Evidence.Window.Duration()))
 	}
 	for _, n := range f.Evidence.Notes {
 		p.dim("    note: %s", wrapIndent(n, 10, p.width()))
@@ -66,7 +76,7 @@ func Explain(w io.Writer, f *api.Finding, res *api.Result, o Options) error {
 	if f.Impact.WindowCost != nil {
 		p.field("Cost", "~%s%s over the window",
 			currencySymbol(f.Impact.Currency), money(*f.Impact.WindowCost))
-		p.dim("               %s rate for %s; ullage never blends rates across models",
+		p.dim("                 %s rate for %s; ullage never blends rates across models",
 			f.Impact.PricingSource, f.Accelerators[0].Model)
 	} else if len(f.Accelerators) > 1 {
 		p.dim("    No cost shown: this finding spans more than one accelerator model,")
@@ -168,9 +178,11 @@ func meaning(f *api.Finding) string {
 		if f.ByDesign {
 			return f.Because
 		}
-		return "These nodes advertise accelerators and are Ready and schedulable, but no pod that " +
-			"requests an accelerator has been placed on them. They are not being drained, they are " +
-			"not cordoned, and they are past the initialisation grace period."
+		return "These nodes advertise accelerators and are Ready and schedulable, but no pod " +
+			"holding an accelerator — by extended resource, MIG profile, time-sliced replica or " +
+			"DRA claim — has been placed on them, and no accelerator on them has reported any " +
+			"work. They are not being drained, they are not cordoned, and they are past the " +
+			"initialisation grace period."
 	}
 	return f.Summary
 }
@@ -196,7 +208,7 @@ func (p *printer) section(title string) {
 }
 
 func (p *printer) field(label, format string, args ...any) {
-	p.line("    %-14s %s", label, fmt.Sprintf(format, args...))
+	p.line("    %-16s %s", label, fmt.Sprintf(format, args...))
 }
 
 func (p *printer) para(s string) {

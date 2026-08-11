@@ -179,6 +179,18 @@ func Build(now time.Time) *Cluster {
 	})
 	c.addSeries("t4-shared-0", "0", "Tesla-T4", 70, "inference", "batch-scorer-0", busy(60))
 	c.addSeries("a100-mig-0", "0", "NVIDIA-A100-SXM4-40GB", 400, "", "", busy(30))
+	// Two tenants holding MIG profiles on that node. Under the mixed strategy
+	// they request nvidia.com/mig-1g.5gb and never nvidia.com/gpu, so a
+	// whole-device count reads this node — which is subscribed and busy — as
+	// completely empty, and recommends deleting it.
+	for _, name := range []string{"mig-tenant-a", "mig-tenant-b"} {
+		c.addPod(pod{
+			namespace: "research", name: name, node: "a100-mig-0", gpus: 0,
+			migSlices: 1, migProfile: "1g.5gb",
+			phase: "Running", started: ago(12 * 24 * time.Hour), uid: "uid-" + name,
+			owner: &ownerRef{kind: "Deployment", name: name, apiVersion: "apps/v1"},
+		})
+	}
 
 	// ---- Scenario 10: DRA, which ullage does analyse ----------------------
 	// DRA went GA in Kubernetes 1.34, and a claim reserves whole devices, so

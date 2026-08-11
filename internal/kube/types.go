@@ -1,6 +1,7 @@
 package kube
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -58,6 +59,42 @@ func (r ResourceList) GPUs() (int, string) {
 		}
 	}
 	return 0, ""
+}
+
+// Slices returns partitioned accelerator requests: MIG profiles under the
+// mixed strategy, which appear as their own extended resources
+// (nvidia.com/mig-1g.5gb and friends) and never as nvidia.com/gpu.
+//
+// These are not whole devices and must never be added to a device count. They
+// are, however, decisive evidence that a pod is occupying accelerator hardware
+// — and a tool that counts only whole devices concludes that a MIG node packed
+// with busy pods has nothing scheduled on it at all.
+func (r ResourceList) Slices() (int, string) {
+	keys := make([]string, 0, len(r))
+	for k := range r {
+		if isSliceResource(k) {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	total, first := 0, ""
+	for _, k := range keys {
+		n, err := strconv.Atoi(strings.TrimSpace(r[k]))
+		if err != nil || n <= 0 {
+			continue
+		}
+		total += n
+		if first == "" {
+			first = k
+		}
+	}
+	return total, first
+}
+
+func isSliceResource(k string) bool {
+	return strings.HasPrefix(k, "nvidia.com/mig-") ||
+		strings.HasPrefix(k, "nvidia.com/gpu.shared") ||
+		strings.HasPrefix(k, "amd.com/gpu.shared")
 }
 
 type ResourceRequirements struct {
@@ -156,6 +193,29 @@ func (p *Pod) GPURequest() (int, string) {
 		if n > 0 {
 			total += n
 			resource = res
+		}
+	}
+	return total, resource
+}
+
+// SliceRequest returns the partitioned accelerator slices a pod requests.
+//
+// Kept separate from GPURequest because the two answer different questions.
+// "How many devices does this pod hold?" must not count a 1g.5gb MIG profile
+// as a whole A100. "Is this node in use?" must count it, or an entire MIG pool
+// running at capacity is reported as empty and recommended for deletion.
+func (p *Pod) SliceRequest() (int, string) {
+	total, resource := 0, ""
+	for _, c := range p.Spec.Containers {
+		n, res := c.Resources.Limits.Slices()
+		if n == 0 {
+			n, res = c.Resources.Requests.Slices()
+		}
+		if n > 0 {
+			total += n
+			if resource == "" {
+				resource = res
+			}
 		}
 	}
 	return total, resource

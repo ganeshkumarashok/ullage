@@ -28,8 +28,10 @@ func (UnusedNode) Describe() Descriptor {
 		Title:    "Unused node",
 		Question: "Is the cluster holding accelerator capacity nothing asked for?",
 		Claim: "These nodes advertise accelerators and are Ready and schedulable, but no pod " +
-			"requesting an accelerator has been placed on them. They are not draining, not " +
-			"cordoned, and past the initialisation grace period.",
+			"holding an accelerator — by extended resource, MIG profile, time-sliced replica or " +
+			"DRA claim — has been placed on them, and no accelerator on them has reported work " +
+			"within the window. They are not draining, not cordoned, and past the " +
+			"initialisation grace period.",
 		Risk: "Removing capacity is a capacity decision, not only a cost one. Confirm the pool is " +
 			"not reserved for a launch, a failover, or a periodic job before scaling it down.",
 		Prevention: "Confirm the autoscaler's minimum size for this pool matches the floor you " +
@@ -43,10 +45,43 @@ func (UnusedNode) Describe() Descriptor {
 func (UnusedNode) Applicable(d inventory.Device) bool { return true }
 
 func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]RawFinding, error) {
+	// Occupancy is asked in the broadest possible terms, because every way of
+	// getting this wrong ends with the tool recommending the deletion of
+	// hardware that is in use. A pod counts if it holds accelerator capacity of
+	// any shape: whole devices, DRA claims, MIG profiles, or time-sliced
+	// replicas.
 	occupied := map[string]bool{}
 	for _, pod := range cl.Pods {
-		if pod.Node != "" && pod.Accelerators > 0 && !pod.Pending {
+		if pod.Node != "" && pod.Occupies() && !pod.Pending {
 			occupied[pod.Node] = true
+		}
+	}
+
+	// Second, independent line of defence: measurement. If any accelerator on a
+	// node has ever reported non-zero utilization inside the window, work ran
+	// there, whatever the Kubernetes object model said. This catches allocation
+	// models nobody has taught the tool about yet — which is the failure mode
+	// that keeps recurring, because the allocation model is the part of this
+	// domain that changes fastest.
+	lastWork := map[string]time.Duration{} // node -> time since work was last seen
+	for _, d := range cl.Devices {
+		if d.Util.Samples == 0 {
+			continue
+		}
+		if d.Util.Max <= 0 {
+			if _, seen := lastWork[d.Node]; !seen {
+				lastWork[d.Node] = cl.Window
+			}
+			continue
+		}
+		since := cl.Window
+		if idle, ok := d.Util.FallowFor(cl.Now); ok {
+			since = idle
+		} else {
+			since = 0
+		}
+		if cur, seen := lastWork[d.Node]; !seen || since < cur {
+			lastWork[d.Node] = since
 		}
 	}
 
@@ -55,6 +90,12 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 		devices  int
 		oldest   time.Duration
 		blockers []api.Blocker
+
+		// measured records that at least one node's fallow duration came from
+		// the utilization series rather than from node age alone.
+		measured   bool
+		unmeasured bool
+
 		provider string
 		model    string
 		vendor   string
@@ -66,6 +107,13 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 
 	for _, node := range cl.Nodes {
 		if node.Accelerators == 0 || occupied[node.Name] {
+			continue
+		}
+		// Measured work overrides an empty pod list. A batch pool that is empty
+		// at this instant but ran a job an hour ago is not idle capacity, and
+		// calling it idle for the node's whole lifetime — which is what the age
+		// alone would say — is an assertion the evidence contradicts.
+		if since, measured := lastWork[node.Name]; measured && since < p.IdleThreshold {
 			continue
 		}
 		// Each of these is a normal state that looks identical to waste from a
@@ -89,8 +137,25 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 		}
 		agg.nodes = append(agg.nodes, node.Name)
 		agg.devices += node.Accelerators
-		if node.Age > agg.oldest {
-			agg.oldest = node.Age
+
+		// How long has this been fallow? The node's age is only an upper bound
+		// — it says how long the node *could* have been empty, not how long it
+		// was. Where the accelerators on it were measured, the trailing run of
+		// zero utilization is the actual observation, and the shorter of the
+		// two is the only number the evidence supports.
+		//
+		// Reporting the age alone would let an hour-old idle period be billed
+		// as a fortnight of waste, which is exactly the kind of inflated number
+		// that gets a tool disbelieved on the number the reader can check.
+		empty := node.Age
+		if since, measured := lastWork[node.Name]; measured && since < empty {
+			empty = since
+			agg.measured = true
+		} else if !measured {
+			agg.unmeasured = true
+		}
+		if empty > agg.oldest {
+			agg.oldest = empty
 		}
 
 		for _, pod := range cl.PodsOnNode(node.Name) {
@@ -120,6 +185,21 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 			fallow = cl.Window
 		}
 
+		notes := []string{"no pod holding an accelerator has been scheduled here"}
+		switch {
+		case agg.measured:
+			notes = append(notes,
+				"the duration is the trailing run of zero utilization measured on these accelerators, "+
+					"not the age of the nodes")
+		case agg.unmeasured:
+			// Saying which of the two numbers this is matters, because they
+			// mean very different things and only one of them is an
+			// observation.
+			notes = append(notes,
+				"no utilization series covered these accelerators, so the duration is the age of the "+
+					"nodes — an upper bound on how long they could have been empty, not a measurement")
+		}
+
 		f := RawFinding{
 			Check: api.CheckUnusedNode,
 			Subject: Subject{
@@ -135,7 +215,7 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 				Window:             api.ISODuration(cl.Window),
 				FallowDuration:     api.ISODuration(fallow),
 				SampleCompleteness: 1,
-				Notes:              []string{"no pod requesting an accelerator has been scheduled here"},
+				Notes:              notes,
 			},
 			Blockers: dedupeBlockers(agg.blockers),
 			Summary: fmt.Sprintf("%d accelerators on pool/%s have had no workload scheduled for %s",

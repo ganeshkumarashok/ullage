@@ -2,6 +2,7 @@ package check_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -452,4 +453,117 @@ func TestUnusedNodeUnderKarpenter(t *testing.T) {
 				"cannot see; that uncertainty belongs in the confidence")
 		}
 	})
+}
+
+// The worst answer this tool can give is "delete this", about hardware that is
+// running at capacity. Both regressions below produced exactly that.
+func TestUnusedNodeNeverRecommendsDeletingBusyHardware(t *testing.T) {
+	t.Run("a MIG node packed with slice-holding pods is not empty", func(t *testing.T) {
+		// Under the MIG mixed strategy a pod requests nvidia.com/mig-1g.5gb and
+		// never nvidia.com/gpu, so its whole-device count is zero. A check that
+		// asks "does any pod hold a device here?" concludes a fully subscribed
+		// MIG node has nothing on it at all.
+		pod := runningPod("research", "mig-tenant", "mig-0", 0)
+		pod.Slices, pod.SliceRes = 1, "nvidia.com/mig-1g.5gb"
+
+		nodes := []inventory.NodeView{
+			{Name: "mig-0", Pool: "a100-mig", Accelerators: 2, Ready: true,
+				Age: 30 * 24 * time.Hour, Allocation: api.AllocMIG},
+		}
+		cl := cluster(nil, []inventory.PodView{pod}, nodes)
+		cl.Autoscaler = &inventory.AutoscalerView{Floors: map[string]int{}}
+
+		if got := find(t, check.UnusedNode{}, cl); len(got) != 0 {
+			t.Fatalf("got %d findings for a MIG node running at capacity; "+
+				"this recommends deleting hardware that is in use, which is worse "+
+				"than reporting nothing at all", len(got))
+		}
+	})
+
+	t.Run("measured work overrides an empty pod list", func(t *testing.T) {
+		// A batch pool empty at this instant but busy an hour ago is not idle
+		// capacity. The pods are gone, so only the metrics can say so.
+		nodes := []inventory.NodeView{
+			{Name: "batch-0", Pool: "batch", Accelerators: 4, Ready: true, Age: 30 * 24 * time.Hour},
+		}
+		devices := []inventory.Device{
+			device("batch-0/0", "batch-0", "batch", nil, idleStats(time.Hour, true)),
+		}
+		cl := cluster(devices, nil, nodes)
+		cl.Autoscaler = &inventory.AutoscalerView{Floors: map[string]int{}}
+
+		if got := find(t, check.UnusedNode{}, cl); len(got) != 0 {
+			t.Fatalf("got %d findings for a pool that ran work an hour ago; a snapshot "+
+				"of the pod list is not evidence of a fortnight of idleness", len(got))
+		}
+	})
+
+	t.Run("the reported duration is measured, not the age of the node", func(t *testing.T) {
+		// A month-old node whose accelerators last did work five days ago has
+		// been fallow for five days, not thirty. Billing the node's whole life
+		// as waste inflates the one number a reader can check by hand.
+		nodes := []inventory.NodeView{
+			{Name: "gpu-0", Pool: "gpu", Accelerators: 4, Ready: true, Age: 30 * 24 * time.Hour},
+		}
+		devices := []inventory.Device{
+			device("gpu-0/0", "gpu-0", "gpu", nil, idleStats(5*24*time.Hour, true)),
+		}
+		cl := cluster(devices, nil, nodes)
+		cl.Autoscaler = &inventory.AutoscalerView{Floors: map[string]int{}}
+
+		got := find(t, check.UnusedNode{}, cl)
+		if len(got) != 1 {
+			t.Fatalf("got %d findings, want 1", len(got))
+		}
+		if got[0].Fallow != 5*24*time.Hour {
+			t.Fatalf("fallow duration %s, want 120h: the node age is an upper bound on how "+
+				"long it could have been empty, not a measurement of how long it was",
+				got[0].Fallow)
+		}
+	})
+
+	t.Run("an unmeasured node says so rather than passing age off as evidence", func(t *testing.T) {
+		nodes := []inventory.NodeView{
+			{Name: "gpu-0", Pool: "gpu", Accelerators: 4, Ready: true, Age: 30 * 24 * time.Hour},
+		}
+		cl := cluster(nil, nil, nodes)
+		cl.Autoscaler = &inventory.AutoscalerView{Floors: map[string]int{}}
+
+		got := find(t, check.UnusedNode{}, cl)
+		if len(got) != 1 {
+			t.Fatalf("got %d findings, want 1", len(got))
+		}
+		var said bool
+		for _, n := range got[0].Evidence.Notes {
+			if strings.Contains(n, "age of the") {
+				said = true
+			}
+		}
+		if !said {
+			t.Fatal("with no metrics the duration is the node's age, and the evidence must " +
+				"say so; presenting an upper bound as an observation is the overstatement " +
+				"this tool exists to avoid")
+		}
+	})
+}
+
+// One Kubernetes pool is routinely several autoscaler node groups — AKS makes
+// one VMSS per zone, EKS one ASG per zone — and GPU capacity is zone
+// constrained, so this is the normal shape rather than an edge case.
+func TestAutoscalerFloorSumsZonalNodeGroups(t *testing.T) {
+	a := &inventory.AutoscalerView{Floors: map[string]int{
+		"aks-h100-12345678-vmss-eastus2-1": 0,
+		"aks-h100-12345678-vmss-eastus2-2": 0,
+		"aks-h100-12345678-vmss-eastus2-3": 2,
+		"aks-other-87654321-vmss":          9,
+	}}
+	got, ok := a.Floor("h100")
+	if !ok {
+		t.Fatal("the pool's node groups were not matched at all")
+	}
+	if got != 2 {
+		t.Fatalf("floor %d, want 2: picking one zone's minimum instead of summing them "+
+			"either calls reserved capacity waste (when the zero wins) or overstates the "+
+			"reservation threefold (when the two does)", got)
+	}
 }

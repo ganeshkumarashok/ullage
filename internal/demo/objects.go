@@ -64,6 +64,13 @@ func (c *Cluster) podItems() []map[string]any {
 				},
 			}
 		}
+		if p.migSlices > 0 {
+			containers[0]["resources"] = map[string]any{
+				"limits": map[string]string{
+					"nvidia.com/mig-" + p.migProfile: fmt.Sprintf("%d", p.migSlices),
+				},
+			}
+		}
 
 		status := map[string]any{"phase": p.phase}
 		if !p.started.IsZero() {

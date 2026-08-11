@@ -200,18 +200,32 @@ func (g *Gatherer) Gather(ctx context.Context, opts Options) (*inventory.Cluster
 	return cl, inv, warnings, nil
 }
 
+// chunk is the sub-window each range aggregate is evaluated over.
+//
+// Aggregate push-down makes the *response* small, but it does not make the
+// query cheap: Prometheus still loads every raw sample in the range to evaluate
+// max_over_time, and that counts against --query.max-samples, which defaults to
+// 50,000,000. At a 30s scrape a 14d range is 40,320 samples per series, so a
+// single whole-window query over one series per GPU exceeds the limit at about
+// 1,240 GPUs — inside the range of cluster this tool is built for, where it
+// fails outright rather than degrading.
+//
+// Evaluating in 24h chunks and combining in Go bounds each query at 2,880
+// samples per series whatever the window length, which puts the ceiling around
+// 17,000 GPUs. max and count both decompose over sub-windows exactly, so this
+// costs nothing in accuracy — only a handful of extra round trips.
+const chunk = 24 * time.Hour
+
 // devices runs the metric queries and joins them into device facts.
 //
 // The queries are aggregate push-downs rather than raw sample streams. The
 // question "was this ever non-zero in the window" is an aggregate, and asking
 // Prometheus for a fortnight of raw samples for every device to answer it in Go
-// would move tens of millions of samples for a few hundred booleans — it hits
-// the query-frontend sample limit long before it hits a real cluster's size.
-// max_over_time answers it in one value per series.
+// would move tens of millions of samples for a few hundred booleans.
 func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *inventory.Inventory, start, end time.Time, step time.Duration) ([]inventory.Device, bool, error) {
 	window := end.Sub(start)
 
-	maxUtil, err := g.instant(ctx, fmt.Sprintf("max_over_time(%s[%s])", MetricGPUUtil, promql.Range(window)), end)
+	maxUtil, err := g.chunked(ctx, MetricGPUUtil, "max_over_time", start, end, maxCombine)
 	if err != nil {
 		return nil, false, err
 	}
@@ -228,7 +242,7 @@ func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *
 		powerWindow = window
 	}
 	avgPower, _ := g.instant(ctx, fmt.Sprintf("avg_over_time(%s[%s])", MetricPower, promql.Range(powerWindow)), end)
-	samples, _ := g.instant(ctx, fmt.Sprintf("count_over_time(%s[%s])", MetricGPUUtil, promql.Range(window)), end)
+	samples, _ := g.chunked(ctx, MetricGPUUtil, "count_over_time", start, end, sumCombine)
 
 	// The sparkline and "when did work last happen" need shape, not precision,
 	// so they use one coarse range query at an hourly step: 336 points per
@@ -328,6 +342,67 @@ func refine(st *inventory.Stats, s promql.Series, start, end time.Time, step tim
 	}
 }
 
+// chunked evaluates a range aggregate in sub-windows and combines the results.
+//
+// Sub-window failures are tolerated as long as one succeeds: a Prometheus that
+// has lost older blocks, or a retention shorter than the window, should shorten
+// the evidence rather than abort the scan. What is not tolerated is silence —
+// a chunk that fails reduces sample completeness, which the checks already
+// treat as a reason to lower confidence rather than to make a claim.
+func (g *Gatherer) chunked(
+	ctx context.Context, metric, fn string, start, end time.Time,
+	combine func(a, b float64) float64,
+) ([]promql.VectorSample, error) {
+	acc := map[string]*promql.VectorSample{}
+	var order []string
+	var lastErr error
+	ok := false
+
+	for at := end; at.After(start); at = at.Add(-chunk) {
+		span := chunk
+		if rem := at.Sub(start); rem < span {
+			span = rem
+		}
+		q := fmt.Sprintf("%s(%s[%s])", fn, metric, promql.Range(span))
+		got, err := g.instant(ctx, q, at)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		ok = true
+		for _, s := range got {
+			k := deviceKey(s.Labels) + "|" + s.Labels["pod"] + s.Labels["exported_pod"]
+			if cur, seen := acc[k]; seen {
+				cur.Value = combine(cur.Value, s.Value)
+				continue
+			}
+			cp := s
+			acc[k] = &cp
+			order = append(order, k)
+		}
+	}
+	if !ok {
+		if lastErr == nil {
+			lastErr = promql.ErrNoSeries
+		}
+		return nil, lastErr
+	}
+	out := make([]promql.VectorSample, 0, len(order))
+	for _, k := range order {
+		out = append(out, *acc[k])
+	}
+	return out, nil
+}
+
+func maxCombine(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func sumCombine(a, b float64) float64 { return a + b }
+
 func (g *Gatherer) instant(ctx context.Context, query string, at time.Time) ([]promql.VectorSample, error) {
 	if g.Trace {
 		g.queries = append(g.queries, query)
@@ -374,6 +449,11 @@ func (g *Gatherer) podView(ctx context.Context, r *Resolver, p *kube.Pod, nsByNa
 	if n := draByPod[p.Metadata.UID]; n > 0 {
 		gpus += n
 	}
+	// The same trap in a second shape. Under the MIG mixed strategy a pod asks
+	// for nvidia.com/mig-1g.5gb, never nvidia.com/gpu, so it holds no whole
+	// device — and a whole-device count reads a MIG pool running at capacity as
+	// completely empty.
+	slices, sliceRes := p.SliceRequest()
 	reason, term := p.WedgedReason()
 
 	prov := r.Resolve(ctx, p)
@@ -387,6 +467,8 @@ func (g *Gatherer) podView(ctx context.Context, r *Resolver, p *kube.Pod, nsByNa
 		Node:         p.Spec.NodeName,
 		Phase:        p.Status.Phase,
 		Accelerators: gpus,
+		Slices:       slices,
+		SliceRes:     sliceRes,
 		Restarts:     p.RestartCount(),
 		WedgedReason: reason,
 		Initialising: initialising(p),

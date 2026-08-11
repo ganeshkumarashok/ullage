@@ -61,6 +61,11 @@ type pod struct {
 	// draDevices is how many devices this pod holds through a ResourceClaim
 	// rather than through the nvidia.com/gpu extended resource.
 	draDevices int
+	// migSlices is how many MIG profiles this pod holds. Under the mixed
+	// strategy these appear as their own extended resource and never as
+	// nvidia.com/gpu, so a pod holding one requests no whole device at all.
+	migSlices  int
+	migProfile string
 }
 
 type ownerRef struct {

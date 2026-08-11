@@ -369,15 +369,34 @@ func meetsConfidence(have, min string) bool {
 	return confidenceRank[have] >= confidenceRank[min]
 }
 
-// sortFindings ranks strictly by fallow accelerator-hours, descending.
+// sortFindings orders by money where money is known, and by accelerator-hours
+// where it is not.
 //
 // Deliberately not a composite score involving confidence or ease of fix: a
 // reader must be able to look at the list and understand instantly why row one
 // is above row two. Confidence filters before ranking; it never acts as a
 // multiplier within it. Ties break deterministically so output is stable
 // between runs on an unchanged cluster.
+//
+// Hours alone are the wrong ranking for a tool that prints a dollar figure on
+// every row: 2,700 hours of L4 is a third of the value of 1,000 hours of A100,
+// so an hours-ranked list puts the cheapest finding at the top and tells the
+// reader to start there. Whoever reads this has limited attention, and the
+// first row is the only one some of them will act on.
+//
+// Findings whose cost is unknown are not silently sorted to the bottom — a
+// missing price is not a small number. They are ranked among themselves by
+// hours and placed after the priced ones, because a number you cannot compare
+// cannot be claimed to be larger.
 func sortFindings(f []api.Finding) {
 	sort.SliceStable(f, func(i, j int) bool {
+		ci, cj := f[i].Impact.WindowCost, f[j].Impact.WindowCost
+		if (ci != nil) != (cj != nil) {
+			return ci != nil
+		}
+		if ci != nil && *ci != *cj {
+			return *ci > *cj
+		}
 		if f[i].Impact.GPUHoursFallow != f[j].Impact.GPUHoursFallow {
 			return f[i].Impact.GPUHoursFallow > f[j].Impact.GPUHoursFallow
 		}

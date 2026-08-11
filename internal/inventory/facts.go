@@ -124,6 +124,13 @@ type PodView struct {
 	StartTime    *time.Time
 	Restarts     int
 
+	// Slices counts partitioned accelerator requests: MIG profiles under the
+	// mixed strategy, or time-sliced replicas. These are not whole devices and
+	// are deliberately kept out of Accelerators, which would otherwise report a
+	// 1g.5gb slice as a whole A100.
+	Slices   int
+	SliceRes string
+
 	// WedgedReason is non-empty when the pod holds devices without running
 	// work: CrashLoopBackOff, OOMKilled, Error, or a stalled init.
 	WedgedReason string
@@ -144,6 +151,16 @@ type PodView struct {
 	Owner      api.Owner
 	Labels     map[string]string
 }
+
+// Occupies reports whether the pod holds accelerator hardware of any kind:
+// whole devices, DRA claims, MIG profiles, or time-sliced replicas.
+//
+// This is a method rather than a field on purpose. It is the question every
+// "is this node in use?" check must ask, and getting it wrong means
+// recommending the deletion of hardware that is at capacity. A field can be
+// left unset by a caller that adds a new allocation model and forgets; a
+// method derived from the counts cannot.
+func (p PodView) Occupies() bool { return p.Accelerators > 0 || p.Slices > 0 }
 
 // Termination describes the last container exit.
 type Termination struct {
@@ -239,7 +256,17 @@ func (a *AutoscalerView) Floor(pool string) (int, bool) {
 	if v, ok := a.Floors[pool]; ok {
 		return v, true
 	}
-	best, bestLen, found := 0, -1, false
+	// One Kubernetes pool is routinely several autoscaler node groups: AKS
+	// creates one VMSS per availability zone and EKS one ASG per zone, and GPU
+	// capacity is zone-constrained often enough that this is the normal case
+	// rather than an edge one.
+	//
+	// So the floors are summed, not picked between. Choosing one group's
+	// minimum would answer a question nobody asked: with zone minimums of
+	// {0, 0, 2} the pool's real floor is 2, but picking a single group returns
+	// 0 — calling genuinely reserved capacity waste — or returns 2 for a pool
+	// that only reserves a third of what that implies.
+	total, found := 0, false
 	names := make([]string, 0, len(a.Floors))
 	for name := range a.Floors {
 		names = append(names, name)
@@ -249,11 +276,10 @@ func (a *AutoscalerView) Floor(pool string) (int, bool) {
 		if !containsPool(name, pool) {
 			continue
 		}
-		if len(name) > bestLen {
-			best, bestLen, found = a.Floors[name], len(name), true
-		}
+		total += a.Floors[name]
+		found = true
 	}
-	return best, found
+	return total, found
 }
 
 func containsPool(groupName, pool string) bool {
