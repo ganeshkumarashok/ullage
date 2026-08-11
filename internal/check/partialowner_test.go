@@ -1,6 +1,7 @@
 package check_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -176,5 +177,113 @@ func TestUnusedNodeCaveatsOnlyEverLowerConfidence(t *testing.T) {
 	if got[0].Confidence != api.EvidenceLow {
 		t.Fatalf("Confidence = %q: an unmeasured duration plus an unreadable autoscaler is two "+
 			"reasons to doubt the finding, and it came out more confident than either", got[0].Confidence)
+	}
+}
+
+// busyStats is a device that did work recently, so its node counts as in use.
+func busyStats() inventory.Stats {
+	t := now.Add(-time.Hour)
+	return inventory.Stats{Samples: 40320, Completeness: 1, Max: 88, LastNonZero: &t}
+}
+
+// An autoscaler minimum reserves a *number of nodes*, not a pool.
+//
+// Held(pool) answered a yes/no question, so a pool of ten nodes with a floor of
+// two filed all its empty nodes as deliberate reserved capacity — including the
+// eight the floor says nothing about. That is the failure mode that quietly
+// makes the tool useless: the pools nobody remembers are the large ones, and a
+// large forgotten pool with any floor at all disappeared from the report.
+func TestUnusedNodeCountsTheFloorRatherThanExemptingThePool(t *testing.T) {
+	const pool = "h100-reserve"
+
+	var nodes []inventory.NodeView
+	var devices []inventory.Device
+	var pods []inventory.PodView
+	for i := 0; i < 10; i++ {
+		name := fmt.Sprintf("reserve-%d", i)
+		nodes = append(nodes, inventory.NodeView{
+			Name: name, Pool: pool, Accelerators: 1, Ready: true,
+			Age: 30 * 24 * time.Hour, Model: "NVIDIA-H100-SXM5-80GB",
+		})
+		// Two nodes are working, so the floor of two is entirely accounted for
+		// by capacity that is already in use and reserves nothing further.
+		if i < 2 {
+			pods = append(pods, runningPod("ml", name+"-job", name, 1))
+			devices = append(devices, device(name+"-gpu", name, pool,
+				&inventory.PodRef{Namespace: "ml", Name: name + "-job", UID: "uid-" + name + "-job"},
+				busyStats()))
+			continue
+		}
+		devices = append(devices, device(name+"-gpu", name, pool, nil, idleStats(10*24*time.Hour, false)))
+	}
+
+	cl := cluster(devices, pods, nodes)
+	cl.Autoscaler = &inventory.AutoscalerView{Floors: map[string]int{pool: 2}}
+
+	got := find(t, check.UnusedNode{}, cl)
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want 1", len(got))
+	}
+	f := got[0]
+	if f.ByDesign {
+		t.Fatal("a floor of 2 on a 10-node pool with 2 nodes working reserves nothing further, " +
+			"but all 8 empty nodes were filed as deliberate and kept out of every waste total")
+	}
+	if len(f.Devices) != 8 {
+		t.Fatalf("the finding covers %d accelerators; 10 nodes minus a floor of 2 leaves 8 "+
+			"the floor does not explain", len(f.Devices))
+	}
+}
+
+// The floor still has to work when it genuinely explains the whole pool, or the
+// fix above would just be the old over-reporting bug in reverse.
+func TestUnusedNodeStillHonoursAFloorThatExplainsEveryNode(t *testing.T) {
+	const pool = "h100-reserve"
+	var nodes []inventory.NodeView
+	var devices []inventory.Device
+	for i := 0; i < 3; i++ {
+		name := fmt.Sprintf("reserve-%d", i)
+		nodes = append(nodes, inventory.NodeView{
+			Name: name, Pool: pool, Accelerators: 1, Ready: true, Age: 30 * 24 * time.Hour,
+		})
+		devices = append(devices, device(name+"-gpu", name, pool, nil, idleStats(10*24*time.Hour, false)))
+	}
+	cl := cluster(devices, nil, nodes)
+	cl.Autoscaler = &inventory.AutoscalerView{Floors: map[string]int{pool: 3}}
+
+	got := find(t, check.UnusedNode{}, cl)
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want 1", len(got))
+	}
+	if !got[0].ByDesign {
+		t.Fatal("all three nodes are held by a floor of three, so this is reserved capacity; " +
+			"reporting it as waste with a scale-down command is how a tool gets uninstalled")
+	}
+}
+
+// A Karpenter disruption budget that allows zero disruptions is not a count.
+// There is no arithmetic to do and no partial answer to give.
+func TestUnusedNodeTreatsAPinnedKarpenterPoolAsWhollyDeliberate(t *testing.T) {
+	const pool = "gpu"
+	var nodes []inventory.NodeView
+	var devices []inventory.Device
+	for i := 0; i < 5; i++ {
+		name := fmt.Sprintf("gpu-%d", i)
+		nodes = append(nodes, inventory.NodeView{
+			Name: name, Pool: pool, Accelerators: 1, Ready: true, Age: 30 * 24 * time.Hour,
+		})
+		devices = append(devices, device(name+"-gpu", name, pool, nil, idleStats(10*24*time.Hour, false)))
+	}
+	cl := cluster(devices, nil, nodes)
+	cl.Autoscaler = &inventory.AutoscalerView{
+		Kind: "karpenter", Floors: map[string]int{}, Pinned: map[string]bool{pool: true}}
+
+	got := find(t, check.UnusedNode{}, cl)
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want 1", len(got))
+	}
+	if !got[0].ByDesign {
+		t.Fatal("a NodePool pinned by a zero-disruption budget is held on purpose in full; " +
+			"there is no per-node arithmetic that makes part of it reclaimable")
 	}
 }

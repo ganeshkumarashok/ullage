@@ -179,6 +179,15 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 	pools := map[string]*poolAgg{}
 	order := []string{}
 
+	// How large is each pool really? A minimum size is a statement about the
+	// pool, not about any one node, so it can only be applied by counting.
+	poolNodes := map[string]int{}
+	for _, node := range cl.Nodes {
+		if node.Accelerators > 0 {
+			poolNodes[node.Pool]++
+		}
+	}
+
 	for _, node := range cl.Nodes {
 		if node.Accelerators == 0 || occupied[node.Name] {
 			continue
@@ -351,7 +360,29 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 		// with a removal command attached, is the fastest way for a tool to be
 		// classified as not understanding the business — so it is separated
 		// out, explained, and kept out of every waste total.
-		if reason, held := cl.Autoscaler.Held(pool); held {
+		reason, held := cl.Autoscaler.Held(pool)
+		// A minimum size reserves a number of nodes, not a pool. Treating it as
+		// a pool-wide exemption meant a pool of twenty nodes with a floor of
+		// two had all eighteen of its empty nodes filed as deliberate — which
+		// hides exactly the waste that matters most, because the pools people
+		// forget about are the big ones. The floor is spent on the nodes that
+		// are working first; only what is left over is genuinely held.
+		reclaimable := len(agg.nodes)
+		floor, hasFloor := cl.Autoscaler.Floor(pool)
+		if held && hasFloor && floor > 0 {
+			if r := poolNodes[pool] - floor; r < reclaimable {
+				reclaimable = r
+			}
+			if reclaimable < 0 {
+				reclaimable = 0
+			}
+		} else if held {
+			// A Karpenter disruption budget pinning the pool is not a count.
+			reclaimable = 0
+		}
+
+		switch {
+		case held && reclaimable == 0:
 			f.ByDesign = true
 			f.Because = fmt.Sprintf(
 				"pool/%s is %s, so these nodes are kept on purpose. ullage cannot tell whether "+
@@ -359,11 +390,24 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 					"visible, not because it is wrong.", pool, reason)
 			f.Summary = fmt.Sprintf("%d %s on pool/%s are held empty deliberately",
 				agg.devices, humanize.Plural(agg.devices, "accelerator"), pool)
-		} else if len(f.Blockers) > 0 {
+
+		case held:
+			// Part deliberate, part not. Which specific nodes the autoscaler
+			// would remove is its choice, so the finding is about the count.
+			f = narrowToNodes(cl, f, agg.nodes[:reclaimable])
+			f.Evidence.Notes = append(f.Evidence.Notes, fmt.Sprintf(
+				"pool/%s is %s; %d of its %d %s are counted against that floor and excluded here, "+
+					"leaving %d that the floor does not explain",
+				pool, reason, floor, poolNodes[pool], humanize.Plural(poolNodes[pool], "node"),
+				reclaimable))
+			f.Summary = fmt.Sprintf("%d %s on pool/%s are empty beyond the pool's minimum size of %d",
+				f.devices(), humanize.Plural(f.devices(), "accelerator"), pool, floor)
+
+		case len(f.Blockers) > 0:
 			f.Evidence.Notes = append(f.Evidence.Notes, fmt.Sprintf(
 				"%d %s prevent the autoscaler from draining these nodes",
 				len(f.Blockers), humanize.Plural(len(f.Blockers), "pod")))
-		} else if cl.Autoscaler.Reclaims() {
+		case cl.Autoscaler.Reclaims():
 			// Karpenter has no minimum size to rule out. An empty node it has
 			// not consolidated is a stronger finding, not a weaker one.
 			f.Evidence.Notes = append(f.Evidence.Notes,
@@ -375,7 +419,7 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 						"cron windows, so consolidation may simply be paused")
 				f.Confidence = atMost(f.Confidence, api.EvidenceMedium)
 			}
-		} else if cl.Autoscaler == nil {
+		case cl.Autoscaler == nil:
 			// Absence of autoscaler status is unknown, never permission. Saying
 			// so is the difference between a cautious tool and a reckless one.
 			f.Evidence.Notes = append(f.Evidence.Notes,
@@ -387,6 +431,21 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 	}
 	return out, nil
 }
+
+// narrowToNodes rewrites a pool finding to cover only some of its nodes.
+//
+// The device list has to be recomputed rather than scaled, because the point of
+// the finding is that every number in it is traceable to specific hardware. A
+// pool finding that claims six accelerators while naming three nodes holding
+// eight is not a rounding error, it is the tool losing the thread.
+func narrowToNodes(cl *inventory.Cluster, f RawFinding, nodes []string) RawFinding {
+	f.Subject.Nodes = nodes
+	f.Devices = nodeDeviceIDs(cl, nodes)
+	return f
+}
+
+// devices is the count the finding is actually about.
+func (f RawFinding) devices() int { return len(f.Devices) }
 
 // atMost caps a confidence, so that a caveat can only ever lower it.
 //
