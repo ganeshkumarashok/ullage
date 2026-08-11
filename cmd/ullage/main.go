@@ -53,7 +53,38 @@ Common flags:
   --min-confidence LEVEL high | medium | low (default medium)
   --config PATH         suppression file (default .ullage.yaml)
   --explain-queries      print the PromQL used, then exit
-  --no-cost              omit money from the output
+  --no-cost              omit money from the output, and rank by
+                         accelerator-hours instead of by spend
+
+Tuning what counts:
+  --idle-threshold DUR   minimum idle time before reporting (default 24h)
+  --stuck-threshold DUR  minimum stuck time before reporting (default 1h)
+  --step DUR             range query resolution (default 1h)
+
+Connecting:
+  --kubeconfig PATH      kubeconfig to use (default $KUBECONFIG, then ~/.kube/config)
+  --context NAME         kubeconfig context to use
+  --api-server URL       Kubernetes API server, if not the one in the kubeconfig
+  --prometheus-auth MODE none | bearer | basic (default none)
+  --prometheus-token TOKEN
+  --prometheus-token-file PATH
+                         file holding the bearer token, re-read at each scan
+  --prometheus-username USER
+  --prometheus-password PASS
+  --prometheus-header K=V  extra request header (repeatable)
+  --insecure-skip-tls-verify
+                         do not verify the Prometheus certificate
+  --timeout DUR          per-query timeout (default 60s)
+
+Output:
+  --pricing PATH         YAML of per-hour prices; overrides the built-in list
+  --quiet                findings only, no header or footer
+  --no-color             never colorize, even on a terminal
+  --exit-zero            always exit 0, even when there are findings
+  --trace                record the queries used in the JSON output
+
+Environment:
+  ULLAGE_PROMETHEUS      default for --prometheus
 
 Exit codes:
   0  no findings above the threshold
@@ -463,21 +494,12 @@ func cmdDemo(ctx context.Context, args []string) error {
 }
 
 func cmdExplain(ctx context.Context, args []string) error {
-	if len(args) == 0 {
+	id, rest := splitPositional(args)
+	if id == "" {
 		return errors.New("usage: ullage explain <finding-id>")
 	}
-	id := args[0]
-	rest := args[1:]
 
-	var isDemo bool
-	filtered := make([]string, 0, len(rest))
-	for _, a := range rest {
-		if a == "--demo" || a == "-demo" {
-			isDemo = true
-			continue
-		}
-		filtered = append(filtered, a)
-	}
+	isDemo, filtered := stripDemo(rest)
 
 	f := newFlags("ullage explain")
 	if err := f.fs.Parse(filtered); err != nil {
@@ -556,12 +578,8 @@ func cmdDoctor(ctx context.Context, args []string) error {
 	if opts.Prometheus.URL == "" {
 		opts.Prometheus.URL = os.Getenv("ULLAGE_PROMETHEUS")
 	}
-	report, err := ullage.Doctor(ctx, opts)
-	if err != nil {
-		return err
-	}
 	ok := true
-	for _, c := range report.Checks {
+	_, err = ullage.Doctor(ctx, opts, func(c ullage.DoctorCheck) {
 		mark := "ok  "
 		switch c.Status {
 		case "fail":
@@ -576,6 +594,9 @@ func cmdDoctor(ctx context.Context, args []string) error {
 		if c.Remedy != "" {
 			fmt.Printf("         → %s\n", c.Remedy)
 		}
+	})
+	if err != nil {
+		return err
 	}
 	fmt.Println()
 	if !ok {
@@ -598,6 +619,56 @@ func cmdChecks() error {
 		fmt.Println()
 	}
 	return nil
+}
+
+// splitPositional pulls the first bare word out of an argument list, wherever
+// it appears, and returns everything else in order. `explain <id> --demo` and
+// `explain --demo <id>` are both things people type, and the second used to
+// take "--demo" as the finding id and then report that it did not exist.
+//
+// It stops at the first bare word rather than filtering all of them, so a value
+// that follows a space-separated flag (`--config path explain-me`) is left
+// attached to its flag.
+func splitPositional(args []string) (string, []string) {
+	rest := make([]string, 0, len(args))
+	var id string
+	for i, a := range args {
+		if id == "" && !strings.HasPrefix(a, "-") && (i == 0 || !isFlagExpectingValue(args[i-1])) {
+			id = a
+			continue
+		}
+		rest = append(rest, a)
+	}
+	return id, rest
+}
+
+// isFlagExpectingValue reports whether a is a flag written without "=", and so
+// consumes the next argument. Booleans never do.
+func isFlagExpectingValue(a string) bool {
+	if !strings.HasPrefix(a, "-") || strings.Contains(a, "=") {
+		return false
+	}
+	switch strings.TrimLeft(a, "-") {
+	case "demo", "no-cost", "quiet", "no-color", "exit-zero", "explain-queries",
+		"trace", "insecure-skip-tls-verify", "help", "h", "version":
+		return false
+	}
+	return true
+}
+
+// stripDemo removes --demo, which is not a registered flag because it is a
+// mode rather than a value.
+func stripDemo(args []string) (bool, []string) {
+	var on bool
+	rest := make([]string, 0, len(args))
+	for _, a := range args {
+		if a == "--demo" || a == "-demo" {
+			on = true
+			continue
+		}
+		rest = append(rest, a)
+	}
+	return on, rest
 }
 
 func cmdIgnore(args []string) error {

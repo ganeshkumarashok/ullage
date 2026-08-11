@@ -32,13 +32,34 @@ type DoctorReport struct {
 // that returns an empty table, leaving the reader unable to tell whether their
 // cluster is efficient or their setup is broken. Those two outcomes look
 // identical and mean opposite things.
-func Doctor(ctx context.Context, opts Options) (*DoctorReport, error) {
+// Doctor probes each prerequisite in turn and reports on it.
+//
+// Any observers are called with each check the moment it resolves, before the
+// next one starts. `doctor` is the command people run when something is
+// already wrong, which is exactly when a probe is slowest -- an unreachable
+// endpoint costs a full timeout. Buffering the whole report until the end means
+// the screen stays blank for as long as that takes, with no indication of what
+// is being waited on, so the tool looks hung at the moment it is being asked
+// what is broken.
+func Doctor(ctx context.Context, opts Options, observers ...func(DoctorCheck)) (*DoctorReport, error) {
 	r := &DoctorReport{OK: true}
 	add := func(c DoctorCheck) {
 		if c.Status == "fail" {
 			r.OK = false
 		}
 		r.Checks = append(r.Checks, c)
+		for _, o := range observers {
+			o(c)
+		}
+	}
+
+	// A probe that has to wait out a dead endpoint still has to wait, but the
+	// scan default is tuned for reading real data over a long window, not for a
+	// reachability question whose answer is one tiny request. Cap it, unless the
+	// caller asked for something shorter still.
+	const probeTimeout = 10 * time.Second
+	if opts.Prometheus.Timeout == 0 || opts.Prometheus.Timeout > probeTimeout {
+		opts.Prometheus.Timeout = probeTimeout
 	}
 
 	kc, err := kube.New(kube.Config{

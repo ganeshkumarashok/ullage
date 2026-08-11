@@ -1,0 +1,65 @@
+# Krew plugin manifest — `kubectl ullage`.
+#
+# ullage is a standalone binary and does not need kubectl. This exists because
+# "which kubectl plugin do I install" is how people look for a cluster tool, and
+# a name that isn't k-prefixed is otherwise easy to miss. Installing through
+# Krew gets the same binary under a name people will find.
+#
+# The sha256 fields below are filled in by the release workflow from the actual
+# artifacts; a placeholder here would install something unverified.
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: ullage
+spec:
+  version: {{ .TagName }}
+  homepage: https://github.com/ullage-project/ullage
+  shortDescription: Find the GPU your cluster paid for and didn't use.
+  description: |
+    ullage reports accelerators a cluster is paying for and not using, and
+    explains its reasoning: which pods held them, for how long, what it cost,
+    and what evidence says the capacity was genuinely idle rather than
+    deliberately reserved.
+
+    It reads only the Kubernetes API and a Prometheus-compatible endpoint,
+    changes nothing, and produces recommendations for a human to act on.
+
+      kubectl ullage                     scan the current cluster
+      kubectl ullage explain <id>        the full evidence for one finding
+      kubectl ullage demo                run against a built-in fake cluster
+      kubectl ullage doctor              check the prerequisites
+
+    Requires a metrics endpoint exporting DCGM (or equivalent) accelerator
+    utilization. `kubectl ullage doctor` will say whether yours qualifies.
+  caveats: |
+    ullage needs a Prometheus-compatible endpoint. Set ULLAGE_PROMETHEUS or
+    pass --prometheus. Run `kubectl ullage doctor` to verify the setup.
+  platforms:
+    - selector:
+        matchLabels:
+          os: darwin
+          arch: amd64
+      uri: https://github.com/ullage-project/ullage/releases/download/{{ .TagName }}/ullage_darwin_amd64.tar.gz
+      sha256: "{{ .Sha256Darwin_amd64 }}"
+      bin: ullage
+    - selector:
+        matchLabels:
+          os: darwin
+          arch: arm64
+      uri: https://github.com/ullage-project/ullage/releases/download/{{ .TagName }}/ullage_darwin_arm64.tar.gz
+      sha256: "{{ .Sha256Darwin_arm64 }}"
+      bin: ullage
+    - selector:
+        matchLabels:
+          os: linux
+          arch: amd64
+      uri: https://github.com/ullage-project/ullage/releases/download/{{ .TagName }}/ullage_linux_amd64.tar.gz
+      sha256: "{{ .Sha256Linux_amd64 }}"
+      bin: ullage
+    - selector:
+        matchLabels:
+          os: linux
+          arch: arm64
+      uri: https://github.com/ullage-project/ullage/releases/download/{{ .TagName }}/ullage_linux_arm64.tar.gz
+      sha256: "{{ .Sha256Linux_arm64 }}"
+      bin: ullage
