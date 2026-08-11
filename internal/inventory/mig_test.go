@@ -128,3 +128,79 @@ func TestMixedStrategyMIGStillReportsPhysicalCards(t *testing.T) {
 			inv.Physical)
 	}
 }
+
+// Allocatable is what the scheduler may place on. Capacity is what the machine
+// has, and what the invoice is for. The device plugin withdraws a device it
+// cannot talk to -- an Xid, a PCIe link that fell off the bus, ECC retirement
+// -- so an 8-GPU node with two dead cards advertises six.
+//
+// Those two are the purest form of the thing this tool exists to find: paid
+// for, and incapable of doing work. Counting allocatable makes them vanish.
+func TestUnhealthyDevicesAreStillPaidFor(t *testing.T) {
+	n := node("a100-degraded", map[string]string{
+		"nvidia.com/gpu.product": "A100-SXM4-40GB",
+		"nvidia.com/gpu.count":   "8",
+	}, nil)
+	n.Status.Capacity = kube.ResourceList{"nvidia.com/gpu": "8"}
+	n.Status.Allocatable = kube.ResourceList{"nvidia.com/gpu": "6"}
+
+	inv := InventoryNode(n, 0)
+
+	if inv.Physical != 8 {
+		t.Fatalf("physical = %d, want 8: two devices are in capacity but not allocatable. "+
+			"The cloud provider bills for eight, so a tool measuring hardware that is paid "+
+			"for and idle cannot report six.", inv.Physical)
+	}
+	if inv.Unhealthy != 2 {
+		t.Errorf("unhealthy = %d, want 2", inv.Unhealthy)
+	}
+	if !strings.Contains(inv.Detail, "still being paid for") {
+		t.Errorf("detail = %q, want it to say the withdrawn devices are still charged: "+
+			"an operator seeing 8 counted and 6 schedulable needs the reason.", inv.Detail)
+	}
+}
+
+// A healthy node must not acquire a phantom fault: capacity equals allocatable
+// there, and any difference reported would be an invented incident.
+func TestHealthyNodeReportsNoUnhealthyDevices(t *testing.T) {
+	n := node("a100-healthy", map[string]string{
+		"nvidia.com/gpu.product": "A100-SXM4-40GB",
+	}, map[string]string{"nvidia.com/gpu": "8"})
+
+	inv := InventoryNode(n, 0)
+
+	if inv.Unhealthy != 0 {
+		t.Fatalf("unhealthy = %d on a node whose capacity and allocatable agree", inv.Unhealthy)
+	}
+	if inv.Physical != 8 {
+		t.Fatalf("physical = %d, want 8", inv.Physical)
+	}
+	if strings.Contains(inv.Detail, "paid for") {
+		t.Errorf("detail = %q on a healthy node: telling an operator that devices have "+
+			"been withdrawn when none have sends them hunting a fault that does not "+
+			"exist, and teaches them to ignore the message when one does.", inv.Detail)
+	}
+}
+
+// A node whose plugin has not started yet advertises nothing allocatable and
+// is already handled as initialising. It must keep that classification rather
+// than be reported as eight simultaneous hardware faults.
+func TestInitialisingNodeIsNotReportedAsUnhealthy(t *testing.T) {
+	n := node("a100-booting", map[string]string{
+		"nvidia.com/gpu.product": "A100-SXM4-40GB",
+		"nvidia.com/gpu.count":   "8",
+	}, nil)
+	n.Status.Capacity = kube.ResourceList{"nvidia.com/gpu": "8"}
+	n.Status.Allocatable = kube.ResourceList{}
+
+	inv := InventoryNode(n, 0)
+
+	if inv.Unhealthy != 0 {
+		t.Errorf("unhealthy = %d: a node still bringing its driver up has not failed, and "+
+			"reporting eight faults would bury the nodes that really did.", inv.Unhealthy)
+	}
+	if !inv.Initialising {
+		t.Errorf("the node lost its initialising classification, so a node that is " +
+			"transiently unused by construction can be reported as waste")
+	}
+}

@@ -48,6 +48,11 @@ type NodeInventory struct {
 	// as a node but its devices are not allocatable. Such a node is transiently
 	// "unused" by construction and must not be reported as waste.
 	Initialising bool
+
+	// Unhealthy counts devices present in capacity but missing from
+	// allocatable. The device plugin withdraws a device it cannot talk to, and
+	// the cloud provider keeps charging for it: unusable and paid for at once.
+	Unhealthy int
 }
 
 // Analyzable reports whether per-pod idleness claims are supportable here.
@@ -226,13 +231,33 @@ func InventoryNode(n *kube.Node, draClaimed int) *NodeInventory {
 		inv.Detail = strategy + ", " + strconv.Itoa(replicas) + " replicas per device"
 
 	default:
-		inv.Physical = advertised
-		if inv.Physical == 0 && labelled > 0 {
+		// Capacity, not allocatable. Allocatable is what the scheduler may
+		// place on; capacity is what the machine has and what the invoice is
+		// for. The device plugin withdraws a device it cannot talk to -- an
+		// Xid, a fallen-off-the-bus PCIe link, ECC retirement -- and an 8-GPU
+		// node with two dead cards advertises six. Trusting allocatable makes
+		// those two disappear from a tool whose entire subject is hardware that
+		// is paid for and not doing work.
+		inv.Physical = maxInt(advertised, capacity)
+		if capacity > advertised && advertised > 0 {
+			inv.Unhealthy = capacity - advertised
+			inv.Detail = strconv.Itoa(inv.Unhealthy) + " of " + strconv.Itoa(capacity) +
+				" devices are in capacity but not allocatable: the device plugin has " +
+				"withdrawn them, and they are still being paid for"
+		}
+		if advertised == 0 && (labelled > 0 || capacity > 0) {
 			// Hardware is present and labelled but nothing is allocatable: the
 			// driver or device plugin has not finished initialising. A newly
 			// scaled-up node looks exactly like an idle one from a distance.
-			inv.Physical = labelled
+			//
+			// This is keyed on allocatable rather than on the physical count,
+			// because the physical count now falls back to capacity: a node
+			// still bringing its driver up has capacity for every card and
+			// allocatable for none, and would otherwise both lose this
+			// classification and be reported as a node full of dead hardware.
+			inv.Physical = maxInt(labelled, capacity)
 			inv.Initialising = true
+			inv.Unhealthy = 0
 			inv.Detail = "GPU hardware present but not yet allocatable"
 		}
 	}
