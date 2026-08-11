@@ -312,3 +312,65 @@ plus new tests for `promql`, `kube`, `inventory`, `scan` and the contract, and
 Tests for `internal/render` and `internal/demo`; the three open reviewer minors
 (Karpenter NodePool name in `fix.go`, `KnownFields` forward-compatibility in
 `config.go`, oscillating suppression warnings).
+
+## v0.1.0 — ready to publish
+
+### Goal
+
+Make the repository safe to make public, and make sure someone who clones it in
+six months can still test it properly.
+
+### Important findings
+
+**The RBAC we ship was never exercised.** Every test and every developer run
+uses a kubeconfig that is usually cluster-admin, so `deploy/rbac.yaml` — the
+file a platform team reads before deciding whether to trust this tool — could
+have been wrong in either direction without anything noticing. Running a scan
+in-cluster as that ServiceAccount and nothing else is now part of the E2E.
+Deleting `pods` from the ClusterRole fails it with the missing verb named.
+
+That immediately exposed an ordering bug: `rbac.yaml` puts a ServiceAccount in
+namespace `ullage`, but the Namespace was declared in `cronjob.yaml`, which the
+README says to apply second. The documented order could never have worked on a
+clean cluster.
+
+**A Forbidden is downgraded to a warning by design**, which means an
+insufficient grant shows up as a quietly smaller answer rather than a crash.
+The RBAC check therefore asserts on the findings, not just the exit code.
+
+**The README was the least-tested file in the repository.** It promised
+`go install` and an image that do not exist until a tag, showed a transcript
+from a build nobody could reproduce, and argued against an unnamed "dashboard"
+while never naming KRR, OpenCost, Kubecost or Cast AI. Two tests now parse every
+documented `ullage` invocation with the real flag set and check the transcript's
+census still reconciles.
+
+**`--help` listed ten flags out of twenty-nine**, omitting ones the tool's own
+error messages tell people to use. The test written to enforce this failed on
+its first run: help promised `--insecure-skip-verify`, the parser wanted
+`--insecure-skip-tls-verify`.
+
+### Failed attempts
+
+`kubectl apply --dry-run=server` cannot validate the manifests, because the
+namespace the objects need is created by the same apply. Verified against a real
+cluster instead.
+
+Capping the doctor probe timeout with `if opts.Prometheus.Timeout == 0` did
+nothing — the flag default pre-fills it, so the guard never fired. It needed
+`|| > probeTimeout`. Measured per-line timestamps to confirm 30s became 10s.
+
+### Files changed
+
+`deploy/rbac.yaml`, `deploy/cronjob.yaml` (namespace ordering), `e2e/kind.sh`
+(new `rbac` mode), `cmd/ullage/main.go` (`splitPositional`, complete `--help`,
+streaming `doctor`), `pkg/ullage/doctor.go` (observers, probe timeout),
+`pkg/ullage/api/api.go` (documented units, one null policy enforced in
+`MarshalJSON`), `README.md`, `.krew.yaml`, plus `cmd/ullage/{args,docs}_test.go`
+and null-policy tests.
+
+### Next
+
+Push to GitHub and let the release workflow build the tag. Submit `.krew.yaml`
+to krew-index once the release artifacts exist. `internal/scan` and
+`internal/kube` remain the thinnest-covered packages.

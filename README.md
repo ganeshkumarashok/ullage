@@ -17,7 +17,7 @@ $ make demo
 ```
 
 ```
-ullage v0.1.0-dev  demo  window 14d
+ullage v0.1.0  demo  window 14d
 
   5.9k of 23k accelerator-hours fallow (26%)
   60 of 68 accelerators analysed  (8 excluded, see below)
