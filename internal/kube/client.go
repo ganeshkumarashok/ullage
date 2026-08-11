@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -27,6 +28,20 @@ type Client struct {
 	http    *http.Client
 	token   string
 	context string
+
+	// Discovery results, per client and behind a mutex.
+	//
+	// This was a package-level map with no lock. Owner resolution walks
+	// ownerReferences concurrently, so two goroutines resolving different
+	// custom resources wrote the same map and the process died with a
+	// concurrent map write -- non-deterministically, on clusters with enough
+	// CRDs, which is to say on real ones and not on the demo.
+	//
+	// Package scope was wrong on its own: a process holding clients for two
+	// clusters would answer one cluster's discovery from the other's cache and
+	// resolve owners against resources that do not exist there.
+	discoveryMu    sync.Mutex
+	discoveryCache map[string][]APIResource
 }
 
 // Config selects an API server and credentials.
@@ -482,21 +497,32 @@ func (c *Client) GetObject(ctx context.Context, apiVersion, kind, namespace, nam
 	return &obj, nil
 }
 
-var discoveryCache = map[string][]APIResource{}
-
 func (c *Client) resourceFor(ctx context.Context, apiVersion, kind string) (string, bool, error) {
-	resources, ok := discoveryCache[apiVersion]
+	c.discoveryMu.Lock()
+	resources, ok := c.discoveryCache[apiVersion]
+	c.discoveryMu.Unlock()
+
 	if !ok {
 		path := "/apis/" + apiVersion
 		if apiVersion == "v1" {
 			path = "/api/v1"
 		}
 		var doc apiResourceList
+		// Deliberately not holding the lock across the request: discovery is a
+		// network round trip, and two goroutines racing to fetch the same
+		// group is a duplicated GET, whereas serialising every owner walk
+		// behind one in-flight request is a stall.
 		if err := c.get(ctx, path, &doc); err != nil {
 			return "", false, err
 		}
 		resources = doc.Resources
-		discoveryCache[apiVersion] = resources
+
+		c.discoveryMu.Lock()
+		if c.discoveryCache == nil {
+			c.discoveryCache = map[string][]APIResource{}
+		}
+		c.discoveryCache[apiVersion] = resources
+		c.discoveryMu.Unlock()
 	}
 	for _, r := range resources {
 		// Skip subresources such as deployments/status.
