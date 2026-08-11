@@ -82,6 +82,23 @@ and safe, rather than another utilization dashboard.
   tool exists to find — paid for by the hour, incapable of work — and they were
   neither idle nor busy nor counted nor mentioned.
 
+### Things that had no tests at all
+
+- **The cluster-autoscaler status parser.** Its output decides whether a pool is
+  "empty and wasting money" or "empty because you told it to be", and none of
+  its three formats — structured YAML, the health-only fallback, the free-text
+  blob older builds publish — had a test. Nor did the three ways the ConfigMap
+  is legitimately unreadable; absent, forbidden and empty must return nil, since
+  an empty status reads downstream as a confirmed absence of any floor.
+- **Karpenter disruption budget reasons were parsed and ignored.** A budget of
+  `nodes: "0", reasons: ["Drifted"]` pins node replacement during an AMI
+  rollout and says nothing about consolidating an empty node, but it was read as
+  a pool that may not shrink at all — suppressing every finding on it, on
+  exactly the clusters careful enough to scope their budgets.
+- **`ullage --version` was an error.** `ullage version` worked; the dashed
+  spelling reached the flag parser and exited 2, which is what every install
+  script and package-manager probe runs first.
+
 ### Failed attempts
 
 - `golang.org/x/term` for TTY detection was dropped to preserve the
