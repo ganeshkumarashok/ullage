@@ -47,7 +47,12 @@ jq -r '
   "Window: \(.scan.window | humanDuration), ending \(.scan.started[0:10]). Cluster: `\(.scan.context)`.",
   "",
   "**\(.scan.gpuHoursFallow | floor) of \(.scan.gpuHoursPaid | floor) accelerator-hours "
-  + "did no work** (\((.scan.gpuHoursFallow / (.scan.gpuHoursPaid // 1) * 100) | floor)%), "
+  # The // operator catches null, not zero, and a cluster with no analysable
+  # accelerators reports zero paid hours -- so guard the divisor explicitly
+  # or the whole digest dies with a division error.
+  + "did no work** (\(if (.scan.gpuHoursPaid // 0) > 0
+                       then (.scan.gpuHoursFallow / .scan.gpuHoursPaid * 100 | floor)
+                       else 0 end)%), "
   + "across \(.scan.acceleratorsAnalyzed) of \(.scan.acceleratorsObserved) accelerators analysed.",
   "",
 

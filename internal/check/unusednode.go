@@ -284,7 +284,15 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 		} else {
 			agg.anyUnmeasured = true
 		}
-		agg.nodeHours[node.Name] = float64(node.Accelerators) * empty.Hours()
+		// Cap each node before it joins the total. Nothing can be fallow for
+		// longer than the window that was examined, and scaling the finished
+		// aggregate instead would shrink the nodes that were already inside
+		// the window to pay for the one that was not.
+		counted := empty
+		if counted > cl.Window {
+			counted = cl.Window
+		}
+		agg.nodeHours[node.Name] = float64(node.Accelerators) * counted.Hours()
 		agg.hours += agg.nodeHours[node.Name]
 
 		// Provenance travels with the number it describes.
@@ -319,11 +327,10 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 		sort.Strings(agg.nodes)
 
 		fallow := agg.oldest
+		// The hours were capped node by node as they were accumulated, so the
+		// total needs no further adjustment; only the headline duration does.
 		hours := agg.hours
 		if fallow > cl.Window {
-			// Capping the headline has to cap the total too, or the two
-			// numbers in the same row disagree.
-			hours *= cl.Window.Hours() / fallow.Hours()
 			fallow = cl.Window
 		}
 

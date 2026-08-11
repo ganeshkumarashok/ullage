@@ -46,6 +46,7 @@ func (StuckPod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Raw
 		pods     []inventory.PodRef
 		devices  int
 		held     time.Duration
+		hours    float64
 		restarts int
 		reason   string
 		term     *inventory.Termination
@@ -88,6 +89,15 @@ func (StuckPod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Raw
 		}
 		g.pods = append(g.pods, pod.Ref)
 		g.devices += pod.Accelerators
+		// Each pod contributes its own devices for its own time. Keeping only
+		// the longest duration and multiplying it by the group's total device
+		// count invents waste: one pod stuck a fortnight beside one stuck an
+		// hour is 337 device-hours, not 672.
+		capped := held
+		if capped > cl.Window {
+			capped = cl.Window
+		}
+		g.hours += capped.Hours() * float64(pod.Accelerators)
 		if held > g.held {
 			g.held = held
 		}
@@ -140,6 +150,10 @@ func (StuckPod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Raw
 				PartialOwner: len(g.pods) < running[key],
 			},
 			Fallow: held,
+			// Fallow above is the longest a single pod was stuck, which is
+			// what the summary talks about. FallowHours is what the group
+			// actually cost, and it is what ranking and pricing use.
+			FallowHours: g.hours,
 			// State is directly observed from the API server rather than
 			// inferred from a sampled series, so there is nothing to be
 			// uncertain about.

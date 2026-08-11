@@ -35,6 +35,14 @@ type NodeInventory struct {
 	Provider string
 	TDPWatts float64
 
+	// PhysicalUnknown marks a node whose real card count cannot be determined
+	// from anything the cluster reports -- today, MIG under the single
+	// strategy, where every label and every resource count has been rewritten
+	// to describe instances. Such capacity is left out of the paid total
+	// rather than guessed at, because a guess here multiplies straight into
+	// the headline figure.
+	PhysicalUnknown bool
+
 	// Physical is the real device count. Advertised is what the device plugin
 	// puts in allocatable, which is inflated under time-slicing.
 	Physical   int
@@ -198,13 +206,21 @@ func InventoryNode(n *kube.Node, draClaimed int) *NodeInventory {
 		if strategy == "single" || migProduct {
 			// Every advertised unit is an instance, not a card, and nothing in
 			// the labels reports how many cards they came from: gpu.count is
-			// rewritten to the instance count too. Reporting the instance count
-			// as a physical count would price a slice like a whole device, so
-			// the node is carried at its advertised count and excluded from
-			// analysis, which is what MIG nodes get regardless of strategy.
-			inv.Physical = maxInt(advertised, labelled)
-			inv.Detail = "MIG enabled (single strategy; " + strconv.Itoa(inv.Physical) +
-				" instances advertised as whole devices)"
+			// rewritten to the instance count too. Time-slicing has a divisor
+			// to undo -- advertised/replicas -- and MIG under this strategy
+			// has none.
+			//
+			// So the card count is unknown, and saying so is the only honest
+			// option. Carrying the instance count as a physical count billed
+			// an eight-card node split seven ways as fifty-six cards: seven
+			// times the capacity it has, in the paid total on the front page
+			// and in every unused-node finding about the pool. Better to
+			// exclude capacity we cannot count than to inflate the number the
+			// whole tool is judged by.
+			inv.PhysicalUnknown = true
+			inv.Physical = 0
+			inv.Detail = "MIG enabled (single strategy; " + strconv.Itoa(maxInt(advertised, labelled)) +
+				" instances advertised, physical card count unknown)"
 		} else {
 			inv.Detail = "MIG enabled (" + strategy + " strategy)"
 		}
@@ -366,8 +382,16 @@ func Build(nodes []kube.Node, draByNode map[string]int) *Inventory {
 			inv.Counts.TimeSliced += ni.Physical
 			add(api.AllocTimeSliced, ni.Detail, ni.Physical, ni.Pool)
 		case api.AllocMIG:
-			inv.Counts.MIG += ni.Physical
-			add(api.AllocMIG, ni.Detail, ni.Physical, ni.Pool)
+			// Under the single strategy the card count is unknown, so the
+			// instances are what there is to report. They are excluded from
+			// analysis either way, and reporting nothing would make the
+			// hardware disappear from the account entirely.
+			counted := ni.Physical
+			if ni.PhysicalUnknown {
+				counted = ni.Advertised
+			}
+			inv.Counts.MIG += counted
+			add(api.AllocMIG, ni.Detail, counted, ni.Pool)
 		case api.AllocDRA:
 			inv.Counts.DRA += ni.Physical
 			// Not excluded: DRA allocation is exclusive, so idleness claims

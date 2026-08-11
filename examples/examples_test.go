@@ -179,3 +179,90 @@ func TestTheBudgetGateWillNotWaveThroughAFindingItCannotPrice(t *testing.T) {
 		t.Fatalf("the gate failed, but not for a reason anyone could act on:\n%s", out)
 	}
 }
+
+// A cluster where nothing could be analysed reports zero paid hours: every
+// node excluded, or an exporter that answered but had no series. That is a
+// perfectly ordinary state, and it is exactly when someone would run the
+// digest to find out why.
+//
+// jq's // operator catches null, not zero, so `.gpuHoursPaid // 1` leaves a
+// literal 0 in place as a divisor and jq aborts the whole program. The report
+// does not come out short -- it does not come out at all.
+func TestWeeklyDigestSurvivesAClusterWithNoAnalysableCapacity(t *testing.T) {
+	const nothingAnalysable = `{
+  "apiVersion": "ullage.dev/v0.1",
+  "scan": {
+    "tool": {"name": "ullage", "version": "v0.0.0-test"},
+    "context": "test-cluster",
+    "started": "2026-08-11T07:00:00Z",
+    "window": "P14D",
+    "acceleratorsObserved": 8,
+    "acceleratorsAnalyzed": 0,
+    "gpuHoursPaid": 0,
+    "gpuHoursFallow": 0
+  },
+  "recommendations": [],
+  "byDesign": [], "suppressed": [], "notAnalyzed": [], "warnings": [],
+  "belowThreshold": [], "unmetDemand": [], "pricing": {}
+}`
+	bin, _ := stub(t, nothingAnalysable)
+
+	cmd := exec.Command("bash", "weekly-digest.sh")
+	cmd.Env = append(os.Environ(), "ULLAGE="+bin, "PROMETHEUS=http://prom.example:9090")
+	out, err := cmd.CombinedOutput()
+
+	if err != nil {
+		t.Fatalf("the digest failed on a cluster with nothing to analyse: %v\n%s\n"+
+			"a zero divisor aborts jq, so the operator gets an error instead of a report "+
+			"telling them nothing was measurable.", err, out)
+	}
+	if !strings.Contains(string(out), "0 of 0 accelerator-hours") {
+		t.Errorf("digest output does not state the empty result plainly:\n%s", out)
+	}
+}
+
+// The gate is configured by environment. Go's flag package stops parsing at
+// the first positional argument, and the script never looked at "$@" at all,
+// so `ci-gate.sh --demo` ran the default scan and reported success as though
+// the flag had been honoured.
+func TestCIGateRejectsArgumentsItCannotHonour(t *testing.T) {
+	bin, _ := stub(t, emptyReport)
+
+	cmd := exec.Command("bash", "ci-gate.sh", "--demo")
+	cmd.Env = append(os.Environ(), "ULLAGE="+bin, "BUDGET_USD=100000")
+	out, err := cmd.CombinedOutput()
+
+	if err == nil {
+		t.Fatalf("the gate accepted an argument it ignores:\n%s\n"+
+			"silently discarding it lets someone believe they pointed the gate somewhere "+
+			"they did not.", out)
+	}
+	if !strings.Contains(string(out), "takes no arguments") {
+		t.Errorf("the gate rejected the argument without saying how to configure it:\n%s", out)
+	}
+}
+
+// The tour is the first thing a contributor runs and the only example the
+// release workflow exercises. ullage exits 1 whenever it finds something,
+// which is every interesting step, so the script has to tolerate that exit
+// code -- but a blanket `|| true` also swallows 127 for a missing binary and
+// 2 for a scan that could not run, and the tour then "passes" while printing
+// nothing but shell errors.
+func TestTourFailsWhenUllageItselfIsBroken(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "ullage")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 2\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("bash", "tour.sh")
+	cmd.Env = append(os.Environ(), "ULLAGE="+bin, "PAUSE=0", "NO_COLOR=1")
+	out, err := cmd.CombinedOutput()
+
+	if err == nil {
+		t.Fatalf("the tour reported success while ullage was failing every command:\n%s", out)
+	}
+	if !strings.Contains(string(out), "exit code 2") {
+		t.Errorf("the tour failed without naming the exit code that caused it:\n%s", out)
+	}
+}

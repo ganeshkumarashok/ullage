@@ -18,6 +18,17 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ULLAGE="${ULLAGE:-$ROOT/bin/ullage}"
 BUDGET_USD="${BUDGET_USD:-500}"
 
+# This gate is configured by environment, not by flags, so anything positional
+# was a misunderstanding -- most likely `--demo`, which is the default here and
+# not a flag anywhere. Accepting and ignoring it would let someone believe they
+# had pointed the gate at something they had not.
+if [ "$#" -gt 0 ]; then
+  echo "ci-gate.sh takes no arguments; it is configured by environment:" >&2
+  echo "  BUDGET_USD=2000 PROMETHEUS=http://prom:9090 $0" >&2
+  echo "(the demo cluster is the default when PROMETHEUS is unset)" >&2
+  exit 2
+fi
+
 command -v jq >/dev/null || { echo "this example needs jq"; exit 2; }
 [ -x "$ULLAGE" ] || (cd "$ROOT" && make build >/dev/null)
 

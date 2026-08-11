@@ -204,3 +204,41 @@ func TestInitialisingNodeIsNotReportedAsUnhealthy(t *testing.T) {
 			"transiently unused by construction can be reported as waste")
 	}
 }
+
+// The paid total is the denominator of every share the report prints and the
+// basis of every dollar figure. Under the single strategy nothing in the
+// cluster reports how many cards the instances were cut from -- gpu.count is
+// rewritten to the instance count along with everything else -- so counting
+// instances there bills an 8-card node as 56 cards.
+//
+// Time-slicing has a divisor to undo and MIG under this strategy has none, so
+// the capacity is carried as unknown and left out of the total rather than
+// guessed at. The instances stay visible in the MIG exclusion, which is where
+// an operator looks to find out what was not measured and why.
+func TestSingleStrategyMIGStaysOutOfThePaidTotal(t *testing.T) {
+	mig := node("mig-single", map[string]string{
+		"nvidia.com/gpu.product": "A100-SXM4-40GB-MIG-1g.5gb",
+		"nvidia.com/gpu.count":   "56",
+	}, map[string]string{"nvidia.com/gpu": "56"})
+	plain := node("exclusive", map[string]string{
+		"nvidia.com/gpu.product": "A100-SXM4-40GB",
+		"nvidia.com/gpu.count":   "8",
+	}, map[string]string{"nvidia.com/gpu": "8"})
+
+	inv := Build([]kube.Node{*mig, *plain}, nil)
+
+	if inv.Observed != 8 {
+		t.Fatalf("observed accelerators = %d, want 8 (the exclusive node alone). The MIG node's "+
+			"56 instances came from an unknown number of cards; adding them to the paid total "+
+			"multiplies straight into the headline hours and the headline dollars.", inv.Observed)
+	}
+	if got := inv.Nodes["mig-single"]; !got.PhysicalUnknown || got.Physical != 0 {
+		t.Fatalf("mig node physical = %d, unknown = %v; want 0 and true, so that no check can "+
+			"bill hours against a card count nobody knows.", got.Physical, got.PhysicalUnknown)
+	}
+	if inv.Counts.MIG != 56 {
+		t.Errorf("MIG count = %d, want 56: the instances must stay visible in the exclusion even "+
+			"though the cards behind them cannot be counted. Reporting nothing would make the "+
+			"hardware vanish from the account entirely.", inv.Counts.MIG)
+	}
+}

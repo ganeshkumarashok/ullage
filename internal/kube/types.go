@@ -187,9 +187,9 @@ type Pod struct {
 	Status   PodStatus  `json:"status"`
 }
 
-// GPURequest returns the total accelerators requested by a pod's containers.
-// Init containers are excluded: their requests are maxed, not summed, and they
-// do not add to the pod's steady-state allocation.
+// GPURequest returns the accelerators a pod effectively reserves. Init
+// containers are included: see effectiveRequest for how, and for why leaving
+// them out hid the pods this tool exists to find.
 func (p *Pod) GPURequest() (int, string) {
 	return effectiveRequest(p, func(c Container) (int, string) {
 		n, res := c.Resources.Limits.GPUs()
@@ -202,7 +202,14 @@ func (p *Pod) GPURequest() (int, string) {
 
 // effectiveRequest applies Kubernetes' effective pod resource request:
 //
-//	max( sum(app containers) + sum(sidecars), max(init containers) )
+//	max( sum(app containers) + sum(sidecars),
+//	     max over init containers of ( sidecars started so far + this one ) )
+//
+// The second term is the part that is easy to get wrong. Restartable init
+// containers -- native sidecars -- start in order and keep running, so an
+// ordinary init container that follows them holds its own request *and*
+// everything they are still holding. A 1-GPU sidecar followed by a 4-GPU init
+// container reserves five accelerators, not four.
 //
 // Init containers were previously ignored entirely, so a pod whose accelerator
 // is requested only by an init container -- the ordinary shape of a job that
@@ -228,17 +235,27 @@ func effectiveRequest(p *Pod, of func(Container) (int, string)) (int, string) {
 		take(of(c))
 	}
 
-	// Sidecars never terminate, so they add. Ordinary init containers run one
-	// at a time and finish, so the pod's floor is the largest of them.
+	// Sidecars never terminate, so they add to the steady state. Ordinary init
+	// containers run one at a time and finish, so the pod's init floor is the
+	// largest single moment during startup -- and at that moment every sidecar
+	// started before it is still holding its own devices.
 	initMax, initRes := 0, ""
+	sidecars := 0
 	for _, c := range p.Spec.InitContainers {
 		n, res := of(c)
 		if c.RestartPolicy == "Always" {
+			sidecars += n
 			take(n, res)
+			if sidecars > initMax {
+				initMax, initRes = sidecars, res
+			}
 			continue
 		}
-		if n > initMax {
-			initMax, initRes = n, res
+		if peak := sidecars + n; peak > initMax {
+			initMax = peak
+			if res != "" {
+				initRes = res
+			}
 		}
 	}
 	if initMax > total {
@@ -285,11 +302,22 @@ func (p *Pod) Controller() *OwnerReference {
 // WedgedReason returns a description of why a pod is stuck holding a device,
 // plus the terminated state that explains it.
 //
-// The phase is deliberately not consulted. A pod bound to a node and wedged on
+// Pending is deliberately not excluded. A pod bound to a node and wedged on
 // ImagePullBackOff is phase Pending and is holding an accelerator the
 // scheduler has already committed to it; whether it holds anything is decided
-// by whether it is bound, not by its phase.
+// by whether it is bound, not by whether it has started.
+//
+// Terminal phases are a different matter. Once a pod is Failed or Succeeded
+// every container has terminated, the kubelet has dropped it from the active
+// set and the device manager has released its devices. It holds nothing, so
+// reporting it as stuck would be a finding about capacity that is already
+// free. A nonzero exit code is also normal for a native sidecar, which makes
+// the container-status test alone actively misleading here.
 func (p *Pod) WedgedReason() (string, *StateTerminated) {
+	if p.Status.Phase == "Failed" || p.Status.Phase == "Succeeded" {
+		return "", nil
+	}
+
 	all := append(append([]ContainerStatus{}, p.Status.ContainerStatuses...), p.Status.InitContainerStatuses...)
 	for _, cs := range all {
 		if cs.State.Waiting != nil {

@@ -12,7 +12,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ULLAGE="${ULLAGE:-$ROOT/bin/ullage}"
-CONFIG="$(mktemp -t ullage-tour)"
+# GNU and BSD mktemp agree on one form only: an explicit template ending in
+# at least six X's. BSD's -t takes a bare prefix and GNU's rejects it.
+CONFIG="$(mktemp "${TMPDIR:-/tmp}/ullage-tour.XXXXXX")"
 trap 'rm -f "$CONFIG"' EXIT
 
 if [ ! -x "$ULLAGE" ]; then
@@ -32,9 +34,19 @@ step() {
   printf '%s\n' "${DIM}$2${R}"
   [ "$PAUSE" = "0" ] || sleep 1
 }
+# ullage exits 1 when it finds something, which is the whole point of the
+# tour, so a plain `set -e` would stop at the first step. Only the documented
+# codes are tolerated: 0 nothing found, 1 findings present. Anything else --
+# 2 for a failed scan, 127 for a missing binary, 139 for a crash -- is a real
+# failure, and swallowing it would let the tour "pass" while printing nothing.
 run() {
   printf '\n%s$ %s%s\n\n' "$C" "$*" "$R"
-  "$@" || true
+  local code=0
+  "$@" || code=$?
+  if [ "$code" -gt 1 ]; then
+    printf '\n%s failed with exit code %d\n' "$1" "$code" >&2
+    exit "$code"
+  fi
   [ "$PAUSE" = "0" ] || sleep 1
 }
 
