@@ -107,12 +107,22 @@ func Doctor(ctx context.Context, opts Options) (*DoctorReport, error) {
 		add(DoctorCheck{Name: "list poddisruptionbudgets", Status: "ok"})
 	}
 
-	if _, err := kc.ClusterAutoscalerStatus(ctx); err != nil {
-		add(DoctorCheck{Name: "cluster-autoscaler status", Status: "warn",
-			Detail: "cluster-autoscaler-status ConfigMap not readable in kube-system",
-			Remedy: "without it, a node pool held open by a minimum size is indistinguishable from waste, so ullage will say so rather than guess"})
-	} else {
-		add(DoctorCheck{Name: "cluster-autoscaler status", Status: "ok"})
+	// Either autoscaler is enough. Only a cluster where neither can be read has
+	// a problem, because then a deliberately reserved pool and a wasted one
+	// look identical.
+	caStatus, caErr := kc.ClusterAutoscalerStatus(ctx)
+	kp, kpErr := kc.KarpenterNodePools(ctx)
+	switch {
+	case caErr == nil && caStatus != nil:
+		add(DoctorCheck{Name: "autoscaler", Status: "ok",
+			Detail: fmt.Sprintf("cluster-autoscaler, %d node groups", len(caStatus.Groups))})
+	case kpErr == nil && kp != nil:
+		add(DoctorCheck{Name: "autoscaler", Status: "ok",
+			Detail: fmt.Sprintf("Karpenter, %d NodePools", len(kp.NodePools))})
+	default:
+		add(DoctorCheck{Name: "autoscaler", Status: "warn",
+			Detail: "no cluster-autoscaler-status ConfigMap in kube-system and no Karpenter NodePools",
+			Remedy: "without one, a node pool held open deliberately is indistinguishable from waste, so ullage will say so rather than guess"})
 	}
 
 	if opts.Prometheus.URL == "" {

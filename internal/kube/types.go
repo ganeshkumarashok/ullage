@@ -383,7 +383,13 @@ type Controller struct {
 }
 
 type list[T any] struct {
-	Items []T `json:"items"`
+	Items    []T `json:"items"`
+	Metadata struct {
+		// Continue is set when the API server truncated the response. Ignoring
+		// it silently returns a partial cluster, and a partial cluster is how a
+		// tool reports a node as empty because the pods on it were on page two.
+		Continue string `json:"continue"`
+	} `json:"metadata"`
 }
 
 // APIResource is one entry from a discovery document.

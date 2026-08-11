@@ -249,11 +249,17 @@ func cmdScan(ctx context.Context, args []string, override func(*ullage.Options))
 		}
 	}
 
-	if !f.quiet && f.output == "table" {
+	// Progress uses a carriage return to rewrite one line in place, which only
+	// works on a terminal. Piped or redirected — into a log, a file, or CI —
+	// the control codes are not interpreted and every step concatenates into
+	// one long unreadable line. A tool that garbles its own output the first
+	// time someone pipes it has told them what to expect from the rest of it.
+	progress := !f.quiet && f.output == "table" && isTerminal(os.Stderr)
+	if progress {
 		opts.Progress = func(msg string) { fmt.Fprintf(os.Stderr, "\r\033[K%s", msg) }
 	}
 	res, scanErr := ullage.Scan(ctx, opts)
-	if !f.quiet && f.output == "table" {
+	if progress {
 		fmt.Fprint(os.Stderr, "\r\033[K")
 	}
 	if scanErr != nil {
@@ -333,7 +339,6 @@ func cmdDemo(ctx context.Context, args []string) error {
 	}
 
 	fmt.Fprintln(os.Stderr, "running against a built-in demo cluster — no real resources are touched")
-	fmt.Fprintln(os.Stderr, "")
 
 	return cmdScan(ctx, rest, func(o *ullage.Options) {
 		o.APIServer = srv.Kube.URL
@@ -521,4 +526,10 @@ func cmdIgnore(args []string) error {
 	}
 	fmt.Printf("suppressed %s in %s\n", id, path)
 	return nil
+}
+
+// isTerminal reports whether a file is an interactive terminal.
+func isTerminal(f *os.File) bool {
+	info, err := f.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }

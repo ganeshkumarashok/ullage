@@ -104,19 +104,37 @@ func (g *Gatherer) Gather(ctx context.Context, opts Options) (*inventory.Cluster
 		MetricsAttributed: schema.Found,
 	}
 
-	// Autoscaler status is the only place a node group's minimum size is
-	// visible from inside the cluster. nil means unknown, and unknown is not
-	// permission to recommend removing capacity.
+	// Who decides whether an empty node stays? nil means nobody could be
+	// identified, and that is unknown, not permission to recommend removing
+	// capacity.
+	//
+	// cluster-autoscaler is asked first because its status ConfigMap carries a
+	// minimum size, which is the strongest signal available. Karpenter has no
+	// minimum size to read, so a cluster running only Karpenter would otherwise
+	// look like a cluster with no autoscaler at all — and would collect the
+	// "a deliberate minimum cannot be ruled out" caveat on every single
+	// finding, which is both noisy and false.
 	if status, err := g.Kube.ClusterAutoscalerStatus(ctx); err == nil && status != nil {
 		floors := map[string]int{}
 		for _, grp := range status.Groups {
 			floors[grp.Name] = grp.MinSize
 		}
-		cl.Autoscaler = &inventory.AutoscalerView{Floors: floors}
+		cl.Autoscaler = &inventory.AutoscalerView{Kind: "cluster-autoscaler", Floors: floors}
+	} else if kp, err := g.Kube.KarpenterNodePools(ctx); err == nil && kp != nil {
+		pinned, scheduled := map[string]bool{}, map[string]bool{}
+		for name, np := range kp.NodePools {
+			pinned[name] = np.Pinned
+			scheduled[name] = np.ScheduledHold
+		}
+		cl.Autoscaler = &inventory.AutoscalerView{
+			Kind:      "karpenter",
+			Pinned:    pinned,
+			Scheduled: scheduled,
+		}
 	} else {
 		warnings = append(warnings,
-			"the cluster-autoscaler status ConfigMap was not readable, so deliberate minimum pool "+
-				"sizes could not be distinguished from unused capacity")
+			"no cluster-autoscaler status ConfigMap and no Karpenter NodePools were readable, so "+
+				"deliberately reserved capacity could not be distinguished from unused capacity")
 	}
 
 	pdbs, _ := g.Kube.PodDisruptionBudgets(ctx)
@@ -410,6 +428,11 @@ func evictability(p *kube.Pod, prov api.Provenance, pdbs []kube.PodDisruptionBud
 	}
 	if strings.EqualFold(p.Metadata.Annotations["cluster-autoscaler.kubernetes.io/safe-to-evict"], "false") {
 		return false, "annotated cluster-autoscaler.kubernetes.io/safe-to-evict: false"
+	}
+	// Karpenter's equivalent. A pod carrying it pins the node under it, which
+	// is exactly the kind of blocker worth naming.
+	if kube.DoNotDisrupt(p.Metadata) {
+		return false, "annotated karpenter.sh/do-not-disrupt: true"
 	}
 	if _, ok := p.Metadata.Annotations["kubernetes.io/config.mirror"]; ok {
 		return false, "static pod, cannot be evicted"

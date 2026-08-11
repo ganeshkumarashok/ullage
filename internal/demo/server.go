@@ -122,20 +122,20 @@ func (c *Cluster) KubeHandler() http.Handler {
 		writeJSON(w, map[string]any{"major": "1", "minor": "34", "gitVersion": "v1.34.1"})
 	})
 	mux.HandleFunc("/api/v1/pods", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, map[string]any{"kind": "PodList", "items": c.podItems()})
+		writePage(w, r, "PodList", c.podItems())
 	})
 	mux.HandleFunc("/api/v1/nodes", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, map[string]any{"kind": "NodeList", "items": c.nodeItems()})
+		writePage(w, r, "NodeList", c.nodeItems())
 	})
 	mux.HandleFunc("/api/v1/namespaces", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, map[string]any{"kind": "NamespaceList", "items": c.namespaceItems()})
+		writePage(w, r, "NamespaceList", c.namespaceItems())
 	})
 	mux.HandleFunc("/api/v1/namespaces/kube-system/configmaps/cluster-autoscaler-status",
 		func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, c.autoscalerConfigMap())
 		})
 	mux.HandleFunc("/apis/policy/v1/poddisruptionbudgets", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, map[string]any{"kind": "PodDisruptionBudgetList", "items": c.pdbItems()})
+		writePage(w, r, "PodDisruptionBudgetList", c.pdbItems())
 	})
 
 	// Discovery, so provenance resolution can walk into a CRD it has never
@@ -257,6 +257,37 @@ func (c *Cluster) controller(name, namespace string) map[string]any {
 		}
 	}
 	return nil
+}
+
+// writePage serves a list the way a real API server does: honouring ?limit and
+// ?continue, and truncating with a continue token when there is more.
+//
+// The demo deliberately pages at a size far below the client's, so every demo
+// run exercises the paging path. A client that ignored the continue token would
+// silently report a cluster missing most of its pods, which is the failure mode
+// most likely to produce a confidently wrong recommendation — and the one least
+// likely to be noticed, since the output still looks perfectly plausible.
+func writePage(w http.ResponseWriter, r *http.Request, kind string, items []map[string]any) {
+	const demoPage = 3
+
+	from := 0
+	if tok := r.URL.Query().Get("continue"); tok != "" {
+		if n, err := strconv.Atoi(tok); err == nil {
+			from = n
+		}
+	}
+	if from > len(items) {
+		from = len(items)
+	}
+	to := from + demoPage
+	if to > len(items) {
+		to = len(items)
+	}
+	out := map[string]any{"kind": kind, "items": items[from:to]}
+	if to < len(items) {
+		out["metadata"] = map[string]any{"continue": strconv.Itoa(to)}
+	}
+	writeJSON(w, out)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

@@ -146,23 +146,34 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 		// with a removal command attached, is the fastest way for a tool to be
 		// classified as not understanding the business — so it is separated
 		// out, explained, and kept out of every waste total.
-		if min, floored := cl.Autoscaler.Floor(pool); floored && min > 0 {
+		if reason, held := cl.Autoscaler.Held(pool); held {
 			f.ByDesign = true
 			f.Because = fmt.Sprintf(
-				"pool/%s is held at a minimum of %d nodes by the cluster autoscaler, so these nodes "+
-					"are kept on purpose. ullage cannot tell whether that reservation is still "+
-					"needed — this is shown so the decision stays visible, not because it is wrong.",
-				pool, min)
-			f.Summary = fmt.Sprintf("%d accelerators on pool/%s are held empty by a minimum-size floor of %d",
-				agg.devices, pool, min)
+				"pool/%s is %s, so these nodes are kept on purpose. ullage cannot tell whether "+
+					"that reservation is still needed — this is shown so the decision stays "+
+					"visible, not because it is wrong.", pool, reason)
+			f.Summary = fmt.Sprintf("%d accelerators on pool/%s are held empty deliberately",
+				agg.devices, pool)
 		} else if len(f.Blockers) > 0 {
 			f.Evidence.Notes = append(f.Evidence.Notes, fmt.Sprintf(
 				"%d pods prevent the autoscaler from draining these nodes", len(f.Blockers)))
+		} else if cl.Autoscaler.Reclaims() {
+			// Karpenter has no minimum size to rule out. An empty node it has
+			// not consolidated is a stronger finding, not a weaker one.
+			f.Evidence.Notes = append(f.Evidence.Notes,
+				"Karpenter manages this pool and has no minimum size, so these nodes should already "+
+					"have been consolidated")
+			if cl.Autoscaler.Scheduled[pool] {
+				f.Evidence.Notes = append(f.Evidence.Notes,
+					"a scheduled disruption budget applies to this NodePool; ullage does not evaluate "+
+						"cron windows, so consolidation may simply be paused")
+				f.Confidence = api.EvidenceMedium
+			}
 		} else if cl.Autoscaler == nil {
 			// Absence of autoscaler status is unknown, never permission. Saying
 			// so is the difference between a cautious tool and a reckless one.
 			f.Evidence.Notes = append(f.Evidence.Notes,
-				"no cluster-autoscaler status was readable, so a deliberate minimum size cannot be ruled out")
+				"no autoscaler status was readable, so a deliberate minimum size cannot be ruled out")
 			f.Confidence = api.EvidenceMedium
 		}
 

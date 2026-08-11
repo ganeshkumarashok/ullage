@@ -304,6 +304,52 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
+// listAll pages through a collection until the API server stops handing back a
+// continue token.
+//
+// The default response limit is generous but not infinite, and the clusters
+// this tool is aimed at are exactly the ones large enough to hit it. A
+// truncated pod list is the worst possible failure here: the missing pods are
+// invisible, so the nodes they occupy look empty and get recommended for
+// deletion. Paging is not an optimisation, it is a correctness requirement.
+//
+// pageSize is deliberately modest. Listing every pod in a 5,000-node cluster in
+// one response is a large allocation on the API server, and ullage is a
+// background tool that has no business causing a latency spike for the
+// workloads it is measuring.
+const pageSize = 500
+
+func listAll[T any](ctx context.Context, c *Client, path string) ([]T, error) {
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	var (
+		out   []T
+		token string
+	)
+	for page := 0; ; page++ {
+		u := fmt.Sprintf("%s%slimit=%d", path, sep, pageSize)
+		if token != "" {
+			u += "&continue=" + url.QueryEscape(token)
+		}
+		var l list[T]
+		if err := c.get(ctx, u, &l); err != nil {
+			// A partial result is not a usable result: returning what we have
+			// would understate occupancy on precisely the pages we did not see.
+			return nil, err
+		}
+		out = append(out, l.Items...)
+		token = l.Metadata.Continue
+		if token == "" {
+			return out, nil
+		}
+		if page > 1000 {
+			return nil, fmt.Errorf("GET %s: still paging after %d pages, refusing to loop", path, page)
+		}
+	}
+}
+
 // ServerVersion returns the reported API server version. The Kubernetes minor
 // version matters: DRA changes the allocation model from 1.34 onward.
 func (c *Client) ServerVersion(ctx context.Context) (string, error) {
@@ -315,35 +361,29 @@ func (c *Client) ServerVersion(ctx context.Context) (string, error) {
 }
 
 func (c *Client) Pods(ctx context.Context) ([]Pod, error) {
-	var l list[Pod]
-	err := c.get(ctx, "/api/v1/pods", &l)
-	return l.Items, err
+	return listAll[Pod](ctx, c, "/api/v1/pods")
 }
 
 func (c *Client) Nodes(ctx context.Context) ([]Node, error) {
-	var l list[Node]
-	err := c.get(ctx, "/api/v1/nodes", &l)
-	return l.Items, err
+	return listAll[Node](ctx, c, "/api/v1/nodes")
 }
 
 func (c *Client) Namespaces(ctx context.Context) ([]ObjectMeta, error) {
-	var l list[struct {
+	items, err := listAll[struct {
 		Metadata ObjectMeta `json:"metadata"`
-	}]
-	if err := c.get(ctx, "/api/v1/namespaces", &l); err != nil {
+	}](ctx, c, "/api/v1/namespaces")
+	if err != nil {
 		return nil, err
 	}
-	out := make([]ObjectMeta, 0, len(l.Items))
-	for _, it := range l.Items {
+	out := make([]ObjectMeta, 0, len(items))
+	for _, it := range items {
 		out = append(out, it.Metadata)
 	}
 	return out, nil
 }
 
 func (c *Client) PodDisruptionBudgets(ctx context.Context) ([]PodDisruptionBudget, error) {
-	var l list[PodDisruptionBudget]
-	err := c.get(ctx, "/apis/policy/v1/poddisruptionbudgets", &l)
-	return l.Items, err
+	return listAll[PodDisruptionBudget](ctx, c, "/apis/policy/v1/poddisruptionbudgets")
 }
 
 // ResourceClaims lists DRA claims, trying the GA group version first and
@@ -351,10 +391,9 @@ func (c *Client) PodDisruptionBudgets(ctx context.Context) ([]PodDisruptionBudge
 // DRA, which is a normal answer and not an error.
 func (c *Client) ResourceClaims(ctx context.Context) ([]ResourceClaim, error) {
 	for _, gv := range []string{"resource.k8s.io/v1", "resource.k8s.io/v1beta1", "resource.k8s.io/v1alpha3"} {
-		var l list[ResourceClaim]
-		err := c.get(ctx, "/apis/"+gv+"/resourceclaims", &l)
+		items, err := listAll[ResourceClaim](ctx, c, "/apis/"+gv+"/resourceclaims")
 		if err == nil {
-			return l.Items, nil
+			return items, nil
 		}
 		var nf *NotFound
 		if !isNotFound(err, &nf) {

@@ -386,3 +386,70 @@ func TestEveryCheckDescribesItself(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// Karpenter is the other half of the autoscaling world, and on AWS it is
+// increasingly the default. It has no minimum-size concept at all, so a tool
+// that only knows how to read the cluster-autoscaler ConfigMap concludes "no
+// autoscaler" and stamps a hedge on every finding in the cluster.
+func TestUnusedNodeUnderKarpenter(t *testing.T) {
+	nodes := []inventory.NodeView{
+		{Name: "gpu-0", Pool: "gpu-a10", Accelerators: 4, Ready: true, Age: 20 * 24 * time.Hour},
+	}
+
+	t.Run("an unconsolidated empty node is a stronger finding, not a hedged one", func(t *testing.T) {
+		cl := cluster(nil, nil, nodes)
+		cl.Autoscaler = &inventory.AutoscalerView{Kind: "karpenter", Pinned: map[string]bool{}}
+
+		got := find(t, check.UnusedNode{}, cl)
+		if len(got) != 1 {
+			t.Fatalf("got %d findings, want 1", len(got))
+		}
+		if got[0].ByDesign {
+			t.Fatal("Karpenter has no minimum size, so nothing here is reserved by design")
+		}
+		if got[0].Confidence != api.EvidenceHigh {
+			t.Fatal("the cluster-autoscaler hedge — 'a deliberate minimum cannot be ruled out' — " +
+				"is meaningless under Karpenter, where no minimum exists to rule out. Printing it " +
+				"anyway would put a false caveat on every finding on every AWS cluster")
+		}
+	})
+
+	t.Run("a zero-node disruption budget is Karpenter's floor", func(t *testing.T) {
+		cl := cluster(nil, nil, nodes)
+		cl.Autoscaler = &inventory.AutoscalerView{
+			Kind:   "karpenter",
+			Pinned: map[string]bool{"gpu-a10": true},
+		}
+
+		got := find(t, check.UnusedNode{}, cl)
+		if len(got) != 1 {
+			t.Fatalf("got %d findings, want 1", len(got))
+		}
+		if !got[0].ByDesign {
+			t.Fatal("a NodePool whose disruption budget allows zero nodes is deliberately pinned; " +
+				"it is the Karpenter equivalent of a minimum size and must not be called waste")
+		}
+	})
+
+	t.Run("a scheduled hold is context, not a conclusion", func(t *testing.T) {
+		cl := cluster(nil, nil, nodes)
+		cl.Autoscaler = &inventory.AutoscalerView{
+			Kind:      "karpenter",
+			Pinned:    map[string]bool{},
+			Scheduled: map[string]bool{"gpu-a10": true},
+		}
+
+		got := find(t, check.UnusedNode{}, cl)
+		if len(got) != 1 {
+			t.Fatalf("got %d findings, want 1", len(got))
+		}
+		if got[0].ByDesign {
+			t.Fatal("ullage does not evaluate cron windows, so it must not claim the pool is " +
+				"deliberately held right now")
+		}
+		if got[0].Confidence == api.EvidenceHigh {
+			t.Fatal("consolidation may simply be paused by the schedule, which the finding " +
+				"cannot see; that uncertainty belongs in the confidence")
+		}
+	})
+}

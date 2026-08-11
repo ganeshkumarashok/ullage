@@ -28,28 +28,6 @@ type NodeGroupStatus struct {
 	Ready   int
 }
 
-// Floor reports whether a node group is held above zero on purpose.
-func (s *AutoscalerStatus) Floor(pool string) (NodeGroupStatus, bool) {
-	if s == nil {
-		return NodeGroupStatus{}, false
-	}
-	g, ok := s.Groups[pool]
-	if !ok {
-		// Node group names are frequently decorated with the VMSS or ASG name,
-		// so fall back to a substring match on the pool.
-		for name, cand := range s.Groups {
-			if strings.Contains(name, pool) {
-				g, ok = cand, true
-				break
-			}
-		}
-	}
-	if !ok || g.MinSize <= 0 {
-		return g, false
-	}
-	return g, true
-}
-
 type configMap struct {
 	Data map[string]string `json:"data"`
 }

@@ -1,6 +1,7 @@
 package inventory
 
 import (
+	"fmt"
 	"sort"
 	"time"
 
@@ -173,10 +174,54 @@ type NodeView struct {
 	ScaleDownDisabled bool
 }
 
-// AutoscalerView exposes the one thing only the autoscaler knows: the minimum
-// size an operator deliberately set.
+// AutoscalerView exposes the one thing only the autoscaler knows: whether an
+// operator deliberately decided this capacity should stay.
+//
+// The two autoscalers express that differently. cluster-autoscaler publishes a
+// per-node-group minimum size. Karpenter has no minimum size at all — it
+// consolidates empty nodes by itself — and instead expresses intent through
+// disruption budgets and do-not-disrupt annotations. Both are represented here
+// so a check can ask "is this deliberate?" without knowing which is installed.
 type AutoscalerView struct {
+	// Kind is the autoscaler that produced this view, for wording.
+	Kind string
+
+	// Floors are cluster-autoscaler minimum node-group sizes.
 	Floors map[string]int
+
+	// Pinned are Karpenter NodePools whose disruption budget allows zero nodes.
+	Pinned map[string]bool
+
+	// Scheduled are Karpenter NodePools pinned only during a cron window, which
+	// ullage does not evaluate. Reported as context, never as a hold.
+	Scheduled map[string]bool
+}
+
+// Reclaims reports whether this autoscaler removes empty nodes on its own
+// without an operator-set minimum standing in the way.
+//
+// This is the difference between "no minimum size was readable, so a deliberate
+// reservation cannot be ruled out" — correct for cluster-autoscaler — and the
+// same sentence on a Karpenter cluster, where it would be printed on every
+// finding and be wrong every time, because Karpenter has no minimum size to
+// read.
+func (a *AutoscalerView) Reclaims() bool {
+	return a != nil && a.Kind == "karpenter"
+}
+
+// Held reports whether a pool is deliberately kept, with the reason.
+// It answers for whichever autoscaler is installed.
+func (a *AutoscalerView) Held(pool string) (string, bool) {
+	if a == nil {
+		return "", false
+	}
+	if min, ok := a.Floor(pool); ok && min > 0 {
+		return fmt.Sprintf("held at a minimum of %d nodes by the cluster autoscaler", min), true
+	}
+	if a.Pinned[pool] {
+		return "held by a Karpenter disruption budget that allows zero nodes to be disrupted", true
+	}
+	return "", false
 }
 
 // Floor returns a pool's minimum size and whether one is set.
