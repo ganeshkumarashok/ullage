@@ -10,6 +10,7 @@
 #
 #   ./e2e/kind.sh up      create the cluster, deploy, scan, assert
 #   ./e2e/kind.sh scan    re-run the scan against a cluster already up
+#   ./e2e/kind.sh rbac    run ullage in-cluster to prove deploy/rbac.yaml is enough
 #   ./e2e/kind.sh down    delete the cluster
 #
 # Requires: kind, kubectl, docker, go. No cloud account, no GPU, no money.
@@ -109,6 +110,7 @@ YAML
   kube -n ml wait --for=condition=Ready pod/llama-train-0 pod/idle-notebook-0 --timeout=180s
 
   scan
+  rbac
 }
 
 # Read a single scalar out of an instant query.
@@ -230,6 +232,93 @@ print("  idle pod reported, busy pod not reported, census reconciles, attributio
   printf 'Tear the cluster down with: ./e2e/kind.sh down\n'
 }
 
+# Run ullage inside the cluster, as the ServiceAccount deploy/rbac.yaml grants,
+# using the image the Dockerfile builds.
+#
+# deploy/rbac.yaml is the file a platform team reads before deciding whether to
+# trust this tool, and the one most likely to drift: a check that starts reading
+# a new resource will pass every unit test and every out-of-cluster run, because
+# a developer's kubeconfig is usually cluster-admin. This is the only thing that
+# actually proves the grant is sufficient -- and, since it is the complete
+# grant, that it is not larger than it needs to be.
+rbac() {
+  preflight
+  need docker "kind needs it too."
+
+  say "building the image"
+  (cd "$ROOT" && docker build -q -t ullage:e2e . >/dev/null)
+  kind load docker-image ullage:e2e --name "$CLUSTER" >/dev/null
+
+  say "applying deploy/rbac.yaml"
+  kube apply -f "$ROOT/deploy/rbac.yaml" >/dev/null
+
+  kube -n ullage delete job ullage-rbac-check --ignore-not-found >/dev/null 2>&1 || true
+  say "running ullage in-cluster as serviceaccount/ullage"
+  kube apply -f - >/dev/null <<YAML
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ullage-rbac-check
+  namespace: ullage
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      serviceAccountName: ullage
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: ullage
+          image: ullage:e2e
+          imagePullPolicy: Never
+          args: ["scan", "--output=json", "--exit-zero",
+                 "--window=${WINDOW}", "--idle-threshold=${IDLE}", "--step=${STEP}"]
+          env:
+            - name: ULLAGE_PROMETHEUS
+              value: http://prometheus.${NS}.svc:9090
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+YAML
+
+  if ! kube -n ullage wait --for=condition=complete job/ullage-rbac-check --timeout=180s >/dev/null 2>&1; then
+    kube -n ullage logs job/ullage-rbac-check 2>&1 | tail -20
+    fail "ullage could not complete a scan with only the permissions deploy/rbac.yaml grants"
+  fi
+
+  kube -n ullage logs job/ullage-rbac-check | python3 -c '
+import json, sys
+r = json.load(sys.stdin)
+problems = []
+
+# A Forbidden on any list is reported as a warning rather than a crash, by
+# design -- so an insufficient grant would otherwise show up as a quietly
+# smaller answer, which is the failure mode this check exists to catch.
+for w in r["warnings"]:
+    if "forbidden" in w.lower() or "not readable" in w.lower():
+        if "cluster-autoscaler" in w or "Karpenter" in w:
+            continue  # kind runs neither; see e2e/README.md
+        problems.append("in-cluster scan hit a permissions warning: " + w)
+
+if r["scan"]["acceleratorsObserved"] == 0:
+    problems.append("in-cluster scan saw no accelerators; it cannot read nodes")
+if not any("idle-notebook-0" in f["id"] for f in r["recommendations"]):
+    problems.append("in-cluster scan did not find the idle pod; it cannot read pods")
+
+if problems:
+    for p in problems:
+        print("  FAIL: " + p)
+    sys.exit(1)
+print("  in-cluster scan succeeded with only the permissions deploy/rbac.yaml grants")
+' || fail "deploy/rbac.yaml does not grant what ullage actually needs"
+
+  printf '\n\033[32mRBAC OK\033[0m\n'
+}
+
 down() {
   say "deleting kind cluster ${CLUSTER}"
   kind delete cluster --name "$CLUSTER"
@@ -238,6 +327,7 @@ down() {
 case "${1:-up}" in
   up)   up ;;
   scan) scan ;;
+  rbac) rbac ;;
   down) down ;;
-  *)    fail "usage: $0 [up|scan|down]" ;;
+  *)    fail "usage: $0 [up|scan|rbac|down]" ;;
 esac

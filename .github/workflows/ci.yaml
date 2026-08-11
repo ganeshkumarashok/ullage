@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: 'stable'
           cache: true
 
       - name: gofmt
@@ -106,3 +106,32 @@ jobs:
         with:
           context: .
           push: false
+          load: true
+          tags: ullage:ci
+
+      # Building the image proves it compiles. Running it proves the entrypoint,
+      # the distroless base and the non-root UID actually work together, which
+      # is the part that breaks and the part nobody notices until a CronJob
+      # CrashLoopBackOffs in someone else's cluster.
+      - name: the image runs, unprivileged and read-only
+        run: |
+          docker run --rm --read-only --user 65532:65532 ullage:ci version
+          docker run --rm --read-only --user 65532:65532 ullage:ci demo --quiet --exit-zero --output json \
+            | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["recommendations"], "no findings"; print("image ok:", len(r["recommendations"]), "findings")'
+
+  vuln:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+      # go-version: stable rather than a pin, deliberately. Most of what
+      # govulncheck finds for a project with one dependency is the Go standard
+      # library, and the fix for those is always "build with a newer patch
+      # release". Pinning the toolchain here would mean the job reports
+      # vulnerabilities it is structurally unable to clear.
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...

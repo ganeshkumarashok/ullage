@@ -7,6 +7,11 @@
 # Read this before you apply it. A tool asking for cluster-wide read is asking
 # for a lot, and you should be able to see exactly what it does with it.
 apiVersion: v1
+kind: Namespace
+metadata:
+  name: ullage
+---
+apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: ullage

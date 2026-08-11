@@ -7,11 +7,19 @@
 # becoming background noise.
 #
 # Apply deploy/rbac.yaml first.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: ullage
----
+#
+# NOTE ON READING THE OUTPUT. This writes JSON to the pod's stdout, which means
+# that unless you collect container logs, nobody will ever see it -- and both
+# success and failure will be equally silent. Before relying on this, pick one:
+#
+#   * scrape the logs (Fluent Bit, Vector, Loki, or your cloud's log agent) and
+#     alert on `.recommendations | length > 0`;
+#   * add a sidecar or a wrapper that POSTs the JSON to Slack, a webhook, or an
+#     object store; or
+#   * run it from CI instead, where somebody is already looking.
+#
+# A scheduled job whose output nobody reads is worse than no job at all: it
+# creates the belief that the question is being asked.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -29,6 +37,10 @@ spec:
         spec:
           serviceAccountName: ullage
           restartPolicy: Never
+          # A scan that hangs on an unreachable Prometheus would otherwise sit
+          # there until the next schedule, holding concurrencyPolicy: Forbid
+          # against its own successor, and the symptom would be silence.
+          activeDeadlineSeconds: 3600
           securityContext:
             runAsNonRoot: true
             runAsUser: 65532

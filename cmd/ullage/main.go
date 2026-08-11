@@ -105,6 +105,13 @@ func run(args []string) error {
 
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		switch args[0] {
+		case "scan":
+			// `ullage` scans by default, but the usage text describes that as
+			// "scan the current cluster", every doctor run ends with "ready to
+			// scan", and the CronJob manifest shipped `args: [scan, ...]` for a
+			// release before anyone ran it. When a tool has taught people a
+			// verb, it should answer to it.
+			return cmdScan(ctx, args[1:], nil)
 		case "explain":
 			return cmdExplain(ctx, args[1:])
 		case "demo":

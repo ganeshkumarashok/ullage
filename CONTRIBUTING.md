@@ -1,0 +1,104 @@
+# Contributing to ullage
+
+Thank you for considering it. This is a young project and the shape of it is
+still negotiable.
+
+## Before anything else: the standard of evidence
+
+ullage exists to be believed. Its entire value is that when it says a GPU did
+nothing for eleven days, a platform engineer can act on that without checking.
+So the bar for a change is not "the tests pass" — it is **"could this ever say
+something false?"**
+
+Concretely, that means:
+
+- **A check must never guess.** If the data cannot distinguish waste from
+  intent, the correct behaviour is to say so and exclude the device from the
+  analysed count, not to report it with a hedge. See `internal/inventory` for
+  the exclusion codes (`ULL-1xx`).
+- **"Nothing found" and "could not look" must never look alike.** A scan that
+  could not reach Prometheus exits 2. A scan that looked and found nothing
+  exits 0 and says which window it actually had.
+- **Every number in a finding must be reproducible from its own evidence
+  block.** If you add a number, add the evidence that justifies it.
+
+## Getting set up
+
+```sh
+git clone https://github.com/ullage-project/ullage
+cd ullage
+make demo      # runs against a built-in fake cluster, no Kubernetes needed
+```
+
+That is the whole setup. ullage has one runtime dependency (`gopkg.in/yaml.v3`);
+the Kubernetes and Prometheus clients are hand-rolled precisely so that
+contributors are not required to understand `client-go` to fix a rendering bug.
+
+## The loop
+
+```sh
+make check     # fmt + vet + race tests. Run this before you push.
+make cover     # per-package coverage
+make e2e-kind  # a real Kubernetes cluster with fake GPUs (needs kind + docker)
+```
+
+`make e2e-kind` is worth the eight minutes if you touched anything in
+`internal/scan`, `internal/inventory` or `internal/promql`. Every bug that
+shipped past the unit suite so far was caught by a real cluster and not by a
+fixture — see `e2e/README.md` for what it does and does not fake.
+
+## Writing a check
+
+A check is one file. Implement three methods, register it in an `init`, and the
+whole pipeline — ownership resolution, provenance, grouping, ranking, pricing,
+suppression, rendering, JSON — applies to your findings for free.
+
+```go
+func init() { check.Register(myCheck{}) }
+
+func (myCheck) Describe() check.Descriptor { ... }
+func (myCheck) Run(ctx context.Context, cl *inventory.Cluster, p check.Params) ([]check.RawFinding, error)
+```
+
+Use `internal/check/idlepod.go` as the model. A check returns *raw* findings —
+subject, evidence, confidence — and decides nothing about presentation.
+
+> **Checks are in-tree for v0.x.** The check and provider contracts live under
+> `internal/`, so they cannot be imported from another module yet. This is
+> deliberate: publishing an extension ABI before the third check taught us what
+> it should look like would freeze the wrong shape. Promoting these to a public
+> package is on the roadmap. Until then, a new check is a pull request here,
+> and we would rather have that conversation than have you fork.
+
+## Writing a cloud provider
+
+`internal/scan/fix.go` holds the `Provider` seam — the cloud-specific half of a
+remediation command. The core carries no cloud SDK and never will. If you
+operate a cloud we render badly, that file is yours to correct.
+
+## Commit messages
+
+Say what changed about the world, not what you did to the files. A message
+should let someone six months from now understand why the old behaviour was
+wrong. If a change fixes something a user could have hit, describe what they
+would have seen.
+
+## Sign-off
+
+Commits must carry a `Signed-off-by` line certifying the
+[Developer Certificate of Origin](https://developercertificate.org/):
+
+```sh
+git commit -s
+```
+
+We use DCO rather than a CLA. It is one line, it requires no paperwork, and it
+is what most CNCF projects use.
+
+## Code of Conduct
+
+This project follows the [CNCF Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Reporting a security issue
+
+Do not open a public issue. See [SECURITY.md](SECURITY.md).
