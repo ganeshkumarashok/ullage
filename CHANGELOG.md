@@ -559,6 +559,36 @@ kept.
   "concurrent map writes" on clusters with enough CRDs. Package scope was wrong
   on its own: two clients in one process answered each other's discovery.
 
+### Confidence built on assumptions nobody checked
+
+- **The scrape interval was assumed to be 30s.** Coverage is samples divided by
+  window over interval, so an exporter scraped at 15s — the kube-prometheus-stack
+  default — halves the expected count, and seven days of data across a fourteen-day
+  window divides out to 100% coverage. A full fortnight of confident observation
+  conjured from half a window, on the one number that decides whether a
+  recommendation gets printed. It is now measured, and snapped to a configured
+  interval because `count_over_time` counts both endpoints and 29.75s would
+  inflate every figure derived from it.
+- **"Pending" meant "phase Pending OR unscheduled".** Those are opposite claims
+  about whether hardware is held. A pod bound to a node and wedged on
+  ImagePullBackOff is phase Pending, and the scheduler has already committed
+  that node's accelerator to it. The consequences ran both ways at once:
+  `unused-node` saw an empty node and offered to delete it, while `stuck-pod` —
+  the check written for precisely this pod — skipped it. The one node definitely
+  wasting money was reported as reclaimable rather than as wedged.
+- **Init containers were excluded from the pod's request.** A job that requests
+  its GPU in an init container to download model weights reported zero
+  accelerators and was invisible to both occupancy and stuck-pod. Requests now
+  follow Kubernetes' effective pod request, `max(sum(app) + sum(sidecars),
+  max(init))`; summing would double-count a pod that asks in both places.
+- **The ownership walk could not tell "found the root" from "could not read the
+  next object".** An RBAC role granting pods but not replicasets stopped the
+  walk at the ReplicaSet, called it the root, and printed `kubectl scale
+  replicaset ... --replicas=0` — which the Deployment above it reverses within
+  seconds. Truncated chains now get no command; the finding still stands,
+  because the idleness is the part that was measured. A 404 is not truncation:
+  a deleted object genuinely has no parent left to find.
+
 ### Failed attempts
 
 Every fix in this round was proven by mutation — break the fix, confirm the test

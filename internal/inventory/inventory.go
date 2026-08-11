@@ -139,6 +139,13 @@ func InventoryNode(n *kube.Node, draClaimed int) *NodeInventory {
 	}
 	mpsCapable := labelIs(n, "nvidia.com/mps.capable", "true")
 
+	// Under the "single" MIG strategy the device plugin advertises instances as
+	// plain nvidia.com/gpu, so an 8-card node partitioned seven ways advertises
+	// 56 -- indistinguishable by count from 56 whole cards, and priced like
+	// them. Feature discovery is what gives it away: it rewrites the product
+	// label to carry the profile, as in A100-SXM4-40GB-MIG-1g.5gb.
+	migProduct := strings.Contains(strings.ToUpper(n.GPUModel()), "MIG-")
+
 	// A MIG node also advertises resources of the form nvidia.com/mig-1g.10gb.
 	migAdvertised := 0
 	for k, v := range n.Status.Allocatable {
@@ -169,7 +176,7 @@ func InventoryNode(n *kube.Node, draClaimed int) *NodeInventory {
 		inv.Physical = maxInt(labelled, draClaimed)
 		inv.Detail = "devices allocated through DRA ResourceClaims"
 
-	case migCapable && (migAdvertised > 0 || (migConfig != "" && migConfig != "all-disabled")):
+	case (migCapable || migProduct) && (migAdvertised > 0 || migProduct || (migConfig != "" && migConfig != "all-disabled")):
 		inv.Allocation = api.AllocMIG
 		inv.Physical = maxInt(labelled, capacity)
 		if inv.Physical == 0 {
@@ -177,9 +184,25 @@ func InventoryNode(n *kube.Node, draClaimed int) *NodeInventory {
 		}
 		strategy := migStrategy
 		if strategy == "" {
-			strategy = "mixed"
+			if migProduct {
+				strategy = "single"
+			} else {
+				strategy = "mixed"
+			}
 		}
-		inv.Detail = "MIG enabled (" + strategy + " strategy)"
+		if strategy == "single" || migProduct {
+			// Every advertised unit is an instance, not a card, and nothing in
+			// the labels reports how many cards they came from: gpu.count is
+			// rewritten to the instance count too. Reporting the instance count
+			// as a physical count would price a slice like a whole device, so
+			// the node is carried at its advertised count and excluded from
+			// analysis, which is what MIG nodes get regardless of strategy.
+			inv.Physical = maxInt(advertised, labelled)
+			inv.Detail = "MIG enabled (single strategy; " + strconv.Itoa(inv.Physical) +
+				" instances advertised as whole devices)"
+		} else {
+			inv.Detail = "MIG enabled (" + strategy + " strategy)"
+		}
 
 	case replicas > 1 || sharing == "time-slicing" || (mpsCapable && sharing == "mps"):
 		inv.Allocation = api.AllocTimeSliced
