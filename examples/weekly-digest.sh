@@ -18,8 +18,17 @@ ULLAGE="${ULLAGE:-$ROOT/bin/ullage}"
 command -v jq >/dev/null || { echo "this example needs jq" >&2; exit 2; }
 [ -x "$ULLAGE" ] || (cd "$ROOT" && make build >/dev/null)
 
-report="$("$ULLAGE" ${PROMETHEUS:+--prometheus "$PROMETHEUS"} ${PROMETHEUS:-demo} \
-            --output json --exit-zero 2>/dev/null)" || {
+# An array, not a string: unquoted ${VAR:+...} word-splits, and Go's flag
+# package stops at the first non-flag argument, so a stray word would silently
+# swallow --output json and hand jq a page of human-readable text.
+args=()
+if [ -n "${PROMETHEUS:-}" ]; then
+  args+=(--prometheus "$PROMETHEUS")
+else
+  args+=(demo)
+fi
+
+report="$("$ULLAGE" "${args[@]}" --output json --exit-zero 2>/dev/null)" || {
   echo "ullage could not complete a scan; run \`ullage doctor\`" >&2
   exit 2
 }

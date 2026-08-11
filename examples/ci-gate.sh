@@ -25,15 +25,27 @@ command -v jq >/dev/null || { echo "this example needs jq"; exit 2; }
 # that we still have to tell a scan that found nothing apart from a scan that
 # could not run: the first is good news, the second is a broken exporter, and a
 # gate that treats them alike is worse than no gate.
+# Built as an array, not a string: an unquoted ${VAR:+...} splits on spaces, and
+# a URL containing one would silently become two arguments. Go's flag package
+# stops parsing at the first non-flag argument, so a stray word here does not
+# fail loudly -- it makes every later flag, including --output json, disappear.
+args=()
+if [ -n "${PROMETHEUS:-}" ]; then
+  args+=(--prometheus "$PROMETHEUS")
+else
+  args+=(demo)
+fi
+
 set +e
-report="$("$ULLAGE" ${PROMETHEUS:+--prometheus "$PROMETHEUS"} ${PROMETHEUS:-demo} \
-            --output json --exit-zero --min-confidence high 2>/dev/null)"
+report="$("$ULLAGE" "${args[@]}" --output json --exit-zero --min-confidence high 2>/dev/null)"
 status=$?
 set -e
 
 if [ $status -ne 0 ] || [ -z "$report" ]; then
   echo "ullage could not complete a scan — failing rather than reporting a clean cluster"
-  "$ULLAGE" doctor ${PROMETHEUS:+--prometheus "$PROMETHEUS"} || true
+  doctor_args=()
+  [ -n "${PROMETHEUS:-}" ] && doctor_args+=(--prometheus "$PROMETHEUS")
+  "$ULLAGE" doctor "${doctor_args[@]+"${doctor_args[@]}"}" || true
   exit 2
 fi
 
@@ -42,6 +54,12 @@ fi
 # becomes noise. Findings under "byDesign" are excluded for the same reason.
 wasted=$(jq '[.recommendations[].impact.windowCost // 0] | add // 0' <<<"$report")
 count=$(jq '.recommendations | length' <<<"$report")
+
+# A finding with no price is not a finding worth $0. If the price book has no
+# entry for an H100, the most expensive waste in the cluster is exactly the part
+# that would slip under a dollar budget silently, so it is counted separately
+# and it fails the gate on its own.
+unpriced=$(jq '[.recommendations[] | select(.impact.windowCost == null)] | length' <<<"$report")
 window=$(jq -r '.scan.window | sub("^P";"") | sub("D$";"d")' <<<"$report")
 
 printf '\n%s findings above high confidence, $%.0f wasted over %s (budget $%s)\n\n' \
@@ -50,6 +68,22 @@ printf '\n%s findings above high confidence, $%.0f wasted over %s (budget $%s)\n
 jq -r '.recommendations[]
        | "  \(.impact.windowCost // 0 | floor | tostring | "$" + .)\t\(.id)\t\(.owner.identity // "unowned")"' \
    <<<"$report" | column -t -s $'\t' 2>/dev/null || true
+
+if [ "$unpriced" -gt 0 ]; then
+  cat <<EOF
+
+FAIL: $unpriced finding(s) have no price, so this budget gate cannot judge them.
+
+  ullage prices what it can from a built-in list; anything it does not
+  recognise needs a price book:
+
+      ullage --pricing prices.yaml ...
+
+  Until then this gate would report \$$(printf '%.0f' "$wasted") while ignoring
+  real accelerators.
+EOF
+  exit 1
+fi
 
 over=$(jq -n --argjson w "$wasted" --argjson b "$BUDGET_USD" '$w > $b')
 if [ "$over" = "true" ]; then
