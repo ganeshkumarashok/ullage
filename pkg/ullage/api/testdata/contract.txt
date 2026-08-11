@@ -129,6 +129,7 @@ scan.allocationModels.mig integer
 scan.allocationModels.timeSliced integer
 scan.context string
 scan.gpuHoursFallow number
+scan.gpuHoursNotAnalysed number
 scan.gpuHoursPaid number
 scan.params.checks[] string
 scan.params.idleThreshold string(iso8601-duration)

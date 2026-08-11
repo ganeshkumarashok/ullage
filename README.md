@@ -12,14 +12,15 @@
 
 <p align="center">
   <img src="docs/hero.svg" width="100%"
-       alt="Three nodes whose accelerators are all allocated. Eleven of the twelve did no GPU work for fourteen days, but four of those are held open deliberately by an autoscaler minimum, so they are shown and never counted as waste. Cluster-wide: 5.9k of 23k accelerator-hours fallow.">
+       alt="Three nodes whose accelerators are all allocated. Eleven of the twelve did no GPU work for fourteen days, but four of those are held open deliberately by an autoscaler minimum, so they are shown and never counted as waste. Cluster-wide: 5.9k of 22k accelerator-hours fallow.">
 </p>
 
 <p align="center"><em>Allocated is not the same as used. Unused is not the same as wasted.<br>The gap between them is the thing this measures.</em></p>
 
 `ullage` measures the accelerator capacity a Kubernetes cluster is paying for
 and not using, attributes it to the workload and the person responsible, and
-tells you the one command that will actually free it.
+gives you the next command to run — the one that frees the capacity where that
+is safe, and the one that identifies what is blocking it where it is not.
 
 It is a measurement, not a verdict. It never writes to your cluster.
 
@@ -45,7 +46,7 @@ $ make demo
 ```
 ullage v0.1.0  demo  window 14d
 
-  5.9k of 23k accelerator-hours fallow (26%)
+  5.9k of 22k accelerator-hours fallow (27%)
   60 of 68 accelerators analysed  (8 excluded, see below)
 
       WORKLOAD                      GPUS   ULLAGE    FOR OWNER           
@@ -119,11 +120,13 @@ those endpoints so you can point the real CLI at them and confirm that.
 
 A number nobody can act on is a number nobody reads. `ullage explain` opens one
 finding: the evidence behind the claim, what the claim deliberately stops short
-of saying, who owns the workload, the one command that frees the capacity, and
-what that command will cost whoever is using it.
+of saying, who owns the workload, the next command to run, and what that
+command will cost whoever is using it. Where something blocks the obvious fix,
+the command it gives you is the one that finds the blocker — and it says so,
+rather than handing you a scale-down that will silently do nothing.
 
 ```console
-$ ullage explain research/jupyter-alice --demo
+$ ./bin/ullage explain research/jupyter-alice --demo
 ```
 
 <details>

@@ -85,10 +85,18 @@ func BuildLedger(res *api.Result) Ledger {
 		notAnalysedAcc += e.Accelerators
 	}
 	// An excluded accelerator was never measured, so no fallow duration exists
-	// for it. It is charged for the whole window, which is what the cluster
+	// for it. It is charged for the time it existed, which is what the cluster
 	// actually paid, and is the honest way to keep it visible rather than
 	// letting unmeasurable capacity quietly leave the denominator.
-	notAnalysedHours := float64(notAnalysedAcc) * windowHours
+	//
+	// The scan reports this on the same per-node basis as GPUHoursPaid. The
+	// fallback covers results built without it -- older JSON, and tests that
+	// assemble a Result by hand -- where charging the whole window is the same
+	// approximation the paid figure itself used to make.
+	notAnalysedHours := res.Scan.GPUHoursNotAnalysed
+	if notAnalysedHours == 0 && notAnalysedAcc > 0 {
+		notAnalysedHours = float64(notAnalysedAcc) * windowHours
+	}
 
 	l := Ledger{
 		Paid:   res.Scan.GPUHoursPaid,

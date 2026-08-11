@@ -53,6 +53,9 @@ Common flags:
   --checks LIST          comma-separated check IDs to run
   --min-confidence LEVEL high | medium | low (default medium)
   --config PATH         suppression file (default .ullage.yaml)
+  --metrics-selector S   PromQL label matchers to scope every query, e.g.
+                         'cluster="prod-eastus"' -- required when Prometheus
+                         federates more than one cluster
   --explain-queries      print the PromQL used, then exit
   --no-cost              omit money from the output, and rank by
                          accelerator-hours instead of by spend
@@ -297,6 +300,24 @@ func (f *flags) options() (ullage.Options, error) {
 	// at the point it is displayed left the JSON output, the pricing block and
 	// the per-row figures untouched, so a user who ran --no-cost before sharing
 	// a report with finance published exactly the numbers they meant to remove.
+	// Accepting "Medium" and " high " costs nothing and removes the most
+	// likely way to trip the check below.
+	f.minConfidence = strings.ToLower(strings.TrimSpace(f.minConfidence))
+
+	// Validated here rather than left to the scanner, because an unrecognised
+	// threshold used to be read as the zero value -- which is the *most*
+	// permissive setting. A typo, or the wholly reasonable "--min-confidence
+	// Medium", quietly published low-confidence findings while the operator
+	// believed they had raised the bar. For a tool whose findings end in
+	// "delete this node pool", failing open on a typo is the worst direction
+	// to fail in.
+	switch f.minConfidence {
+	case "", api.EvidenceHigh, api.EvidenceMedium, api.EvidenceLow:
+	default:
+		return ullage.Options{}, fmt.Errorf(
+			"unknown --min-confidence %q; want high, medium or low", f.minConfidence)
+	}
+
 	// Never loading the rates means no cost can be emitted by any surface.
 	var prices *api.Pricing
 	if !f.noCost {

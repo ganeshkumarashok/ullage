@@ -67,15 +67,37 @@ that no page documents a check that no longer exists.
 
 ## Writing a check
 
-A check is one file. Implement three methods, register it in an `init`, and the
-whole pipeline — ownership resolution, provenance, grouping, ranking, pricing,
-suppression, rendering, JSON — applies to your findings for free.
+A check is one Go file plus its documentation. Implement three methods,
+register it in an `init`, and the whole pipeline — ownership resolution,
+provenance, grouping, ranking, pricing, suppression, rendering, JSON — applies
+to your findings for free.
+
 ```go
 func init() { check.Register(myCheck{}) }
 
 func (myCheck) Describe() check.Descriptor { ... }
+
+// Applicable reports whether the check can make a claim about a device at all.
+// False is not "found nothing": those devices are counted as not-analysed, so
+// the output can always tell "clean" apart from "never looked at".
+func (myCheck) Applicable(d inventory.Device) bool { ... }
+
 func (myCheck) Run(ctx context.Context, cl *inventory.Cluster, p check.Params) ([]check.RawFinding, error)
 ```
+
+Three files change, and the tests enforce all three — `go test ./internal/check/`
+will tell you if you miss one:
+
+1. `internal/check/<id>.go` — the check itself.
+2. `docs/checks/<id>.md` — opening with `# <id>` and carrying the sections
+   `## What the finding claims`, `## How it is measured`, `## What it does not
+   mean`, `## When this finding is wrong`, `## What to do` and `## Suppressing`,
+   plus a copyable `ullage ignore <id>/...` line.
+3. `docs/checks/README.md` — a link to the new page.
+
+The "when this finding is wrong" section is not a formality. A check that
+cannot describe its own false positives should not be recommending that anyone
+delete anything.
 
 Use `internal/check/idlepod.go` as the model. A check returns *raw* findings —
 subject, evidence, confidence — and decides nothing about presentation.

@@ -31,15 +31,17 @@ type Client struct {
 
 	// Discovery results, per client and behind a mutex.
 	//
-	// This was a package-level map with no lock. Owner resolution walks
-	// ownerReferences concurrently, so two goroutines resolving different
-	// custom resources wrote the same map and the process died with a
-	// concurrent map write -- non-deterministically, on clusters with enough
-	// CRDs, which is to say on real ones and not on the demo.
+	// The CLI resolves owners sequentially, so the lock is not load-bearing
+	// for the binary in this repository. It is here because Client is reached
+	// through pkg/ullage, where an embedder scanning several clusters from a
+	// worker pool has every reason to expect a plain struct with a map in it
+	// to be safe, and a concurrent map write terminates the whole process
+	// rather than returning an error they could handle.
 	//
-	// Package scope was wrong on its own: a process holding clients for two
-	// clusters would answer one cluster's discovery from the other's cache and
-	// resolve owners against resources that do not exist there.
+	// Per-client scope matters regardless of concurrency: as a package-level
+	// map, a process holding clients for two clusters answered one cluster's
+	// discovery from the other's cache and resolved owners against resources
+	// that do not exist there.
 	discoveryMu    sync.Mutex
 	discoveryCache map[string][]APIResource
 }

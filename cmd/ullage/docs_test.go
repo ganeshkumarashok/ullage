@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"os"
 	"regexp"
 	"strings"
@@ -226,4 +227,51 @@ func TestEveryFlagInTheHelpTextIsRealAtTheTopLevel(t *testing.T) {
 	if len(seen) == 0 {
 		t.Fatal("no flags were found in the usage text, so this test is checking nothing")
 	}
+}
+
+// The README opens with `make demo`, which builds ./bin/ullage and does not
+// install it. Every command shown before the install section therefore has to
+// be runnable from the clone -- a reader who copies the first two commands in
+// order and gets "ullage: command not found" has learned that the docs were
+// never run, on the third command they ever typed.
+func TestCommandsShownBeforeInstallRunFromTheClone(t *testing.T) {
+	raw, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatalf("read README: %v", err)
+	}
+	readme := string(raw)
+
+	install := strings.Index(readme, "## Install")
+	if install < 0 {
+		t.Fatal("README has no `## Install` section; this test can no longer tell " +
+			"which commands precede installation")
+	}
+
+	for i, line := range strings.Split(readme[:install], "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "$ ullage") {
+			continue
+		}
+		t.Errorf("README:%d shows `%s` before the install section, but the only "+
+			"binary a reader has at that point is ./bin/ullage from `make demo`. "+
+			"Use ./bin/ullage, or move the command below `## Install`.",
+			i+1, trimmed)
+	}
+}
+
+// The companion to TestEveryFlagInTheHelpTextIsRealAtTheTopLevel, which only
+// closed the direction where help promises something the parser rejects. This
+// closes the other one: --metrics-selector existed, was load-bearing for
+// anyone whose Prometheus federates several clusters, was documented in the
+// README, and never appeared in --help. A flag nobody can discover is a flag
+// that does not exist for most users.
+func TestEveryRegisteredFlagIsDocumentedInTheHelpText(t *testing.T) {
+	f := newFlags("doc")
+	f.fs.VisitAll(func(fl *flag.Flag) {
+		if !strings.Contains(usage, "--"+fl.Name) {
+			t.Errorf("--%s is registered but never mentioned in the help text; "+
+				"document it under an appropriate heading in `usage`, or drop the flag",
+				fl.Name)
+		}
+	})
 }

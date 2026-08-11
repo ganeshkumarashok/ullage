@@ -192,3 +192,21 @@ func TestDeletedOwnerIsNotReportedAsAPermissionsGap(t *testing.T) {
 			"to edit a Role that is already correct.", denied)
 	}
 }
+
+// app.kubernetes.io/managed-by names the tool that applied the manifest, not a
+// person. It used to be the last owner fallback, which meant that on any
+// cluster deployed by Helm or Argo CD -- most of them -- "the person
+// responsible for this idle GPU" resolved to "helm" for nearly every pod.
+func TestManagedByIsNotTreatedAsAnOwner(t *testing.T) {
+	pod := &kube.Pod{}
+	pod.Metadata.Labels = map[string]string{
+		"app.kubernetes.io/managed-by": "helm",
+	}
+
+	got := AttributeOwner(pod, nil, nil)
+	if got.Identity == "helm" {
+		t.Fatalf("owner resolved to %q via %q: managed-by names the deploying tool, "+
+			"and a finding that says to go talk to Helm helps nobody",
+			got.Identity, got.ResolvedVia)
+	}
+}

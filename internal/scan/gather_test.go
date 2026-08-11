@@ -305,6 +305,25 @@ func TestAnUnknownConfidenceNeverClearsARealBar(t *testing.T) {
 	}
 }
 
+// The mirror image of the test above, and the one that was missing. The
+// `have` side failed closed only by accident of the zero value; the `min`
+// side used the same accident to fail *open*, so "--min-confidence Medium"
+// was more permissive than "--min-confidence high".
+func TestAnUnknownBarIsReadAsTheStrictestOne(t *testing.T) {
+	if meetsConfidence("low", "bogus") {
+		t.Error("an unrecognised bar admitted a low-confidence finding; a typo must " +
+			"never lower the threshold on a tool that recommends deleting hardware")
+	}
+	if meetsConfidence("medium", "bogus") {
+		t.Error("an unrecognised bar admitted a medium-confidence finding; unknown " +
+			"must mean strictest, not most permissive")
+	}
+	if !meetsConfidence("high", "bogus") {
+		t.Error("an unrecognised bar rejected a high-confidence finding; strictest " +
+			"means high, not impossible")
+	}
+}
+
 func TestNamespaceScopeDefaultsToTheWholeCluster(t *testing.T) {
 	o := &Options{}
 	o.Defaults()

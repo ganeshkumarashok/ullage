@@ -3,6 +3,7 @@ package check
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -95,6 +96,28 @@ func TestNoOrphanedCheckPages(t *testing.T) {
 		}
 		if check := strings.TrimSuffix(name, ".md"); !registered[check] {
 			t.Errorf("docs/checks/%s documents %q, which is not a registered check", name, check)
+		}
+	}
+}
+
+// CONTRIBUTING once said "implement three methods" and then listed two,
+// omitting Applicable. Copying the snippet verbatim produced a type that did
+// not satisfy check.Check, so the first thing a new contributor did failed to
+// compile. Reflection keeps the document honest when the interface changes.
+func TestContributingDocumentsEveryMethodOfTheCheckInterface(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "CONTRIBUTING.md"))
+	if err != nil {
+		t.Fatalf("read CONTRIBUTING.md: %v", err)
+	}
+	text := string(body)
+
+	iface := reflect.TypeOf((*Check)(nil)).Elem()
+	for i := 0; i < iface.NumMethod(); i++ {
+		name := iface.Method(i).Name
+		if !strings.Contains(text, name) {
+			t.Errorf("CONTRIBUTING.md never mentions the %s method, which check.Check "+
+				"requires; a contributor following the guide will write a type that "+
+				"does not compile", name)
 		}
 	}
 }

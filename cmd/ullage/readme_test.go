@@ -184,3 +184,50 @@ func firstLine(s string) string {
 	}
 	return s
 }
+
+// The `ullage demo` summary at the top of the README carried "5.9k of 23k
+// accelerator-hours fallow (26%)" for a while after the paid-hours arithmetic
+// started charging nodes for the time they existed rather than for the whole
+// window. Nothing caught it: the explain transcript was pinned, and `make
+// check` only asserted that the demo exits cleanly, never that it printed what
+// the front page claims.
+//
+// That headline is the first number a reader sees, immediately above the
+// sentence "every number above is computed, not canned". It has to be true.
+func TestREADMEHeadlineMatchesTheDemo(t *testing.T) {
+	t.Setenv("ULLAGE_DEMO_NOW", readmeDemoNow)
+	actual := captureStdout(t, func() {
+		if err := run([]string{"demo", "--exit-zero"}); err != nil {
+			t.Fatalf("running the demo: %v", err)
+		}
+	})
+
+	raw, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatalf("read README: %v", err)
+	}
+	readme := string(raw)
+
+	summary := regexp.MustCompile(`(?m)^\s*[\d.]+k? of [\d.]+k? accelerator-hours fallow \(\d+%\)\s*$`)
+	line := summary.FindString(actual)
+	if line == "" {
+		t.Fatalf("the demo no longer prints a fallow summary line; this test can no "+
+			"longer pin the README headline.\n\n%s", actual)
+	}
+	want := strings.TrimSpace(line)
+
+	if !strings.Contains(readme, want) {
+		t.Errorf("the demo prints %q, which appears nowhere in the README.\n\n"+
+			"The headline and the alt text on the hero image both quote this number. "+
+			"Regenerate them with:\n"+
+			"  ULLAGE_DEMO_NOW=%s go run ./cmd/ullage demo --exit-zero",
+			want, readmeDemoNow)
+	}
+
+	// The accelerator census sits directly under it and drifts for the same
+	// reasons.
+	census := regexp.MustCompile(`(?m)^\s*\d+ of \d+ accelerators analysed.*$`)
+	if c := strings.TrimSpace(census.FindString(actual)); c != "" && !strings.Contains(readme, c) {
+		t.Errorf("the demo prints %q, which appears nowhere in the README", c)
+	}
+}

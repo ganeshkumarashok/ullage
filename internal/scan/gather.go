@@ -124,7 +124,7 @@ func (g *Gatherer) Gather(ctx context.Context, opts Options) (*inventory.Cluster
 	}
 
 	opts.Progress("Classifying accelerator allocation")
-	inv := inventory.Build(nodes, draByNode)
+	inv := inventory.Build(nodes, draByNode, end, opts.Window)
 	if inv.Observed == 0 {
 		return nil, inv, append(warnings, "no accelerators were found on any node"), nil
 	}

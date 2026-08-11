@@ -73,10 +73,14 @@ func TestDiscoveryIsNotSharedBetweenClusters(t *testing.T) {
 	}
 }
 
-// Owner resolution walks ownerReferences concurrently. An unsynchronised map
-// write is not a slow path or a stale read -- the Go runtime kills the process
-// with "concurrent map writes", so a scan of a cluster with enough CRDs
-// crashes non-deterministically. Run under -race this fails outright.
+// Client is part of the public surface through pkg/ullage, so an embedder can
+// scan several clusters from a worker pool. An unsynchronised map write is not
+// a slow path or a stale read -- the Go runtime kills the process with
+// "concurrent map writes", which an embedder cannot catch or recover from.
+//
+// The CLI itself resolves owners sequentially, so this guards the library
+// contract rather than a path the binary exercises. Run under -race it fails
+// outright if the discovery cache loses its lock.
 func TestConcurrentDiscoveryIsSafe(t *testing.T) {
 	srv := discoveryServer(t, "a")
 	c, err := New(Config{APIServer: srv.URL, Token: "t"})

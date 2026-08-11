@@ -1,5 +1,12 @@
 # Built-in accelerator rates, in USD per device-hour.
 #
+# Provenance, stated plainly because a number with no source is not evidence:
+# these were compiled by hand in August 2026 from published on-demand list
+# prices for US regions across the major clouds, rounded down to two decimal
+# places. No provider, region, commitment or currency other than USD is
+# modelled, and nothing updates them -- they drift out of date from the day
+# they are written.
+#
 # These are rough public on-demand list prices, and they are wrong for almost
 # everyone: reservations, savings plans, spot and negotiated discounts all move
 # them, often by more than half. They exist so the first run shows a number of

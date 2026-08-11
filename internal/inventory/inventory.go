@@ -3,6 +3,7 @@ package inventory
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ullage-project/ullage/internal/kube"
 	"github.com/ullage-project/ullage/pkg/ullage/api"
@@ -334,27 +335,39 @@ type Inventory struct {
 	Analyzed int
 	Counts   api.AllocationCounts
 
+	// PaidHours is billed accelerator-time over the window, summed per node as
+	// min(node age, window) x accelerators rather than count x window, so a
+	// node that joined this morning is not billed for the whole fortnight.
+	PaidHours float64
+
+	// NotAnalysedHours is the same measure restricted to hardware no check
+	// could judge. Kept on the identical per-node basis as PaidHours so the
+	// ledger's buckets cannot outgrow the capacity they subdivide.
+	NotAnalysedHours float64
+
 	Exclusions []api.Exclusion
 }
 
 // Build classifies every node and produces the analysed/not-analysed
 // accounting that the rest of the output depends on.
-func Build(nodes []kube.Node, draByNode map[string]int) *Inventory {
+func Build(nodes []kube.Node, draByNode map[string]int, end time.Time, window time.Duration) *Inventory {
 	inv := &Inventory{Nodes: map[string]*NodeInventory{}}
 
 	type bucket struct {
 		devices int
+		hours   float64
 		pools   map[string]bool
 		detail  string
 	}
 	shared := map[string]*bucket{}
-	add := func(kind, detail string, devices int, pool string) {
+	add := func(kind, detail string, devices int, pool string, hours float64) {
 		b, ok := shared[kind]
 		if !ok {
 			b = &bucket{pools: map[string]bool{}}
 			shared[kind] = b
 		}
 		b.devices += devices
+		b.hours += hours
 		b.pools[pool] = true
 		if b.detail == "" {
 			b.detail = detail
@@ -370,17 +383,31 @@ func Build(nodes []kube.Node, draByNode map[string]int) *Inventory {
 		inv.Nodes[n.Metadata.Name] = ni
 		inv.Observed += ni.Physical
 
+		// A node is billed from the moment it exists, not from the start of
+		// the window. Clamping to the window keeps a long-lived node at its
+		// full share; clamping at zero guards a creation timestamp in the
+		// future, which clock skew produces more often than one would like.
+		billable := window
+		if age := end.Sub(n.Metadata.CreationTimestamp); age < billable {
+			billable = age
+		}
+		if billable < 0 {
+			billable = 0
+		}
+		nodeHours := billable.Hours()
+		inv.PaidHours += float64(ni.Physical) * nodeHours
+
 		switch ni.Allocation {
 		case api.AllocExclusive:
 			inv.Counts.DevicePluginExclusive += ni.Physical
 			if ni.Initialising {
-				add("initialising", ni.Detail, ni.Physical, ni.Pool)
+				add("initialising", ni.Detail, ni.Physical, ni.Pool, float64(ni.Physical)*nodeHours)
 			} else {
 				inv.Analyzed += ni.Physical
 			}
 		case api.AllocTimeSliced:
 			inv.Counts.TimeSliced += ni.Physical
-			add(api.AllocTimeSliced, ni.Detail, ni.Physical, ni.Pool)
+			add(api.AllocTimeSliced, ni.Detail, ni.Physical, ni.Pool, float64(ni.Physical)*nodeHours)
 		case api.AllocMIG:
 			// Under the single strategy the card count is unknown, so the
 			// instances are what there is to report. They are excluded from
@@ -391,14 +418,14 @@ func Build(nodes []kube.Node, draByNode map[string]int) *Inventory {
 				counted = ni.Advertised
 			}
 			inv.Counts.MIG += counted
-			add(api.AllocMIG, ni.Detail, counted, ni.Pool)
+			add(api.AllocMIG, ni.Detail, counted, ni.Pool, float64(counted)*nodeHours)
 		case api.AllocDRA:
 			inv.Counts.DRA += ni.Physical
 			// Not excluded: DRA allocation is exclusive, so idleness claims
 			// hold. It is recorded separately only so the census is honest
 			// about how the devices were found.
 			if ni.Initialising {
-				add("initialising", ni.Detail, ni.Physical, ni.Pool)
+				add("initialising", ni.Detail, ni.Physical, ni.Pool, float64(ni.Physical)*nodeHours)
 			} else {
 				inv.Analyzed += ni.Physical
 			}
@@ -423,6 +450,7 @@ func Build(nodes []kube.Node, draByNode map[string]int) *Inventory {
 		}
 		sortStrings(pools)
 		poolList := strings.Join(pools, ", ")
+		inv.NotAnalysedHours += b.hours
 
 		switch kind {
 		case api.AllocTimeSliced:

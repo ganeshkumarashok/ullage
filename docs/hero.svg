@@ -215,7 +215,7 @@
   </g>
 
   <g class="verdict">
-    <text class="sans" x="66" y="394" font-size="17" font-weight="600" fill="#e6edf3">5.9k of 23k accelerator-hours fallow (26%) · 60 of 68 accelerators analysed</text>
+    <text class="sans" x="66" y="394" font-size="17" font-weight="600" fill="#e6edf3">5.9k of 22k accelerator-hours fallow (27%) · 60 of 68 accelerators analysed</text>
 
     <text class="mono" x="66" y="424" font-size="12.5" fill="#8b949e">1. research/jupyter-alice · 3 accelerators · 1.0k fallow · ~$3,427 · alice@example.com</text>
     <text class="mono" x="66" y="452" font-size="13" fill="#79c0ff">$ kubectl scale statefulset -n research jupyter-alice --replicas=0</text>

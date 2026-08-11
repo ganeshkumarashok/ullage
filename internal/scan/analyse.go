@@ -119,7 +119,8 @@ func Analyse(ctx context.Context, cl *inventory.Cluster, inv *inventory.Inventor
 			AcceleratorsObserved: inv.Observed,
 			AcceleratorsAnalyzed: inv.Analyzed,
 			AllocationModels:     inv.Counts,
-			GPUHoursPaid:         float64(inv.Observed) * cl.Window.Hours(),
+			GPUHoursPaid:         inv.PaidHours,
+			GPUHoursNotAnalysed:  inv.NotAnalysedHours,
 			ProfilingMetrics:     cl.ProfilingMetrics,
 		},
 		Recommendations: []api.Finding{},
@@ -435,8 +436,27 @@ var confidenceRank = map[string]int{
 	api.EvidenceHigh:   2,
 }
 
+// meetsConfidence reports whether a finding clears the operator's bar.
+//
+// Both sides fail closed on an unrecognised level, and they fail closed in
+// opposite directions on purpose. An unknown level on the `have` side means a
+// check emitted something this build does not understand, so it must not be
+// published. An unknown level on the `min` side means the caller asked for a
+// bar that does not exist -- read as the zero value that would once have been
+// "low", it silently *lowered* the threshold, which is the one direction a
+// tool that recommends deleting hardware must never fail in. The CLI rejects
+// such a value outright; this guard covers callers of pkg/ullage, who have no
+// flag parser between them and this function.
 func meetsConfidence(have, min string) bool {
-	return confidenceRank[have] >= confidenceRank[min]
+	h, ok := confidenceRank[have]
+	if !ok {
+		return false
+	}
+	m, ok := confidenceRank[min]
+	if !ok {
+		m = confidenceRank[api.EvidenceHigh]
+	}
+	return h >= m
 }
 
 // sortFindings orders by money where money is known, and by accelerator-hours

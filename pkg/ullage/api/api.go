@@ -485,9 +485,24 @@ type ScanMeta struct {
 	AcceleratorsObserved int              `json:"acceleratorsObserved"`
 	AcceleratorsAnalyzed int              `json:"acceleratorsAnalyzed"`
 	AllocationModels     AllocationCounts `json:"allocationModels"`
-	GPUHoursPaid         float64          `json:"gpuHoursPaid"`
-	GPUHoursFallow       float64          `json:"gpuHoursFallow"`
-	ProfilingMetrics     bool             `json:"profilingMetricsAvailable"`
+	// GPUHoursPaid is billed accelerator-time over the window, summed per node
+	// as min(node age, window) x accelerators. Multiplying the current count
+	// by the whole window -- which is what this used to do -- charges a node
+	// created an hour ago for fourteen days, and on an autoscaling GPU cluster
+	// that is not a rounding error. It is still an approximation: a node that
+	// existed and was deleted inside the window has already left the census
+	// and cannot be counted at all.
+	GPUHoursPaid float64 `json:"gpuHoursPaid"`
+
+	// GPUHoursNotAnalysed is billed accelerator-time on hardware no check
+	// could judge, on the same per-node basis as GPUHoursPaid. It is carried
+	// here rather than recomputed from a device count so that the two agree:
+	// derived independently, the "no usable metric" bucket could exceed the
+	// capacity it is a subset of and drive the ledger residual negative.
+	GPUHoursNotAnalysed float64 `json:"gpuHoursNotAnalysed"`
+
+	GPUHoursFallow   float64 `json:"gpuHoursFallow"`
+	ProfilingMetrics bool    `json:"profilingMetricsAvailable"`
 
 	// Queries is the exact PromQL issued, populated on request. The trust
 	// argument for this tool is that its claims are checkable, which is empty

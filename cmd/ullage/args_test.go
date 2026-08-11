@@ -121,3 +121,38 @@ func TestEveryDocumentedFlagParses(t *testing.T) {
 		}
 	}
 }
+
+// --min-confidence used to accept anything. An unrecognised level was read as
+// the zero value, which is the most permissive bar there is, so a typo -- or
+// the entirely reasonable "Medium" -- silently published the low-confidence
+// findings the operator believed they had just filtered out. Nothing else in
+// the tool fails in that direction, and this one recommends deleting nodes.
+func TestAnUnknownMinConfidenceIsRejectedRatherThanFailingOpen(t *testing.T) {
+	f := &flags{minConfidence: "bogus", noCost: true}
+	_, err := f.options()
+	if err == nil {
+		t.Fatal("--min-confidence bogus was accepted; an unrecognised bar must be " +
+			"rejected, never read as the most permissive setting")
+	}
+	for _, want := range []string{"bogus", "high", "medium", "low"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q; it must name what was rejected "+
+				"and what the valid levels are", err, want)
+		}
+	}
+}
+
+// Rejecting "Medium" would be safe but needlessly hostile, so it is accepted
+// and normalised. This is the case a user is most likely to actually type.
+func TestMinConfidenceIsCaseInsensitive(t *testing.T) {
+	for _, in := range []string{"Medium", "MEDIUM", " medium "} {
+		f := &flags{minConfidence: in, noCost: true}
+		o, err := f.options()
+		if err != nil {
+			t.Fatalf("--min-confidence %q was rejected: %v", in, err)
+		}
+		if o.MinConfidence != "medium" {
+			t.Errorf("--min-confidence %q became %q, want %q", in, o.MinConfidence, "medium")
+		}
+	}
+}

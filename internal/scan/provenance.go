@@ -324,12 +324,18 @@ func deleteCommand(namespace string, pods []string) string {
 // ownerLabelKeys are checked in order. Explicit ullage keys win, then the
 // common conventions, so a cluster can opt into precise attribution without
 // giving up the defaults.
+//
+// app.kubernetes.io/managed-by is deliberately absent. The Kubernetes
+// recommended-label spec defines it as the *tool* managing the application, so
+// on a GitOps cluster it is "helm" or "argocd" on nearly every pod. Resolving
+// "who is responsible for this idle GPU" to "helm" is not a near miss: it is a
+// confident answer to the wrong question, it would be the single most common
+// answer this tool gives, and it names nobody who can act.
 var ownerLabelKeys = []string{
 	"ullage.dev/owner",
 	"owner",
 	"app.kubernetes.io/owner",
 	"team",
-	"app.kubernetes.io/managed-by",
 }
 
 // AttributeOwner resolves who is responsible, and records how it was resolved.

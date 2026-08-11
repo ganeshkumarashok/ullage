@@ -64,7 +64,6 @@ type pod struct {
 	waiting     string
 	terminated  *terminated
 	restarts    int
-	initWaiting bool
 	uid         string
 	// draDevices is how many devices this pod holds through a ResourceClaim
 	// rather than through the nvidia.com/gpu extended resource.

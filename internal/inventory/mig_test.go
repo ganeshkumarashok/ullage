@@ -3,6 +3,7 @@ package inventory
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ullage-project/ullage/internal/kube"
 	"github.com/ullage-project/ullage/pkg/ullage/api"
@@ -55,7 +56,7 @@ func TestSingleStrategyMIGNodeIsExcludedFromAnalysis(t *testing.T) {
 		"nvidia.com/gpu.count":   "21",
 	}, map[string]string{"nvidia.com/gpu": "21"})
 
-	inv := Build([]kube.Node{*n}, nil)
+	inv := Build([]kube.Node{*n}, nil, time.Now(), 14*24*time.Hour)
 
 	if inv.Counts.MIG != 21 {
 		t.Fatalf("MIG count = %d, want 21: the instances were not attributed to MIG.", inv.Counts.MIG)
@@ -225,7 +226,7 @@ func TestSingleStrategyMIGStaysOutOfThePaidTotal(t *testing.T) {
 		"nvidia.com/gpu.count":   "8",
 	}, map[string]string{"nvidia.com/gpu": "8"})
 
-	inv := Build([]kube.Node{*mig, *plain}, nil)
+	inv := Build([]kube.Node{*mig, *plain}, nil, time.Now(), 14*24*time.Hour)
 
 	if inv.Observed != 8 {
 		t.Fatalf("observed accelerators = %d, want 8 (the exclusive node alone). The MIG node's "+
