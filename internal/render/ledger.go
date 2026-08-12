@@ -31,12 +31,12 @@ type Ledger struct {
 
 	Rows []LedgerRow
 
-	// Fallow is the bucket the whole report is about: capacity with an owner
+	// Unused is the bucket the whole report is about: capacity with an owner
 	// and, usually, a command.
-	Fallow float64
+	Unused float64
 
 	// Residual is Paid minus every other bucket. It is deliberately not called
-	// "used": ullage measures fallow hours, not productive ones, and an hour in
+	// "used": ullage measures unused hours, not productive ones, and an hour in
 	// here may be real work or may be idleness that did not clear the reporting
 	// threshold. Naming it "utilized" would claim a measurement that was never
 	// taken.
@@ -61,7 +61,7 @@ type LedgerRow struct {
 	Hours        float64
 	Accelerators int
 
-	// Deduction distinguishes hours removed from the total from the fallow
+	// Deduction distinguishes hours removed from the total from the unused
 	// hours that remain at the end of it.
 	Deduction bool
 
@@ -84,7 +84,7 @@ func BuildLedger(res *api.Result) Ledger {
 	for _, e := range res.NotAnalyzed {
 		notAnalysedAcc += e.Accelerators
 	}
-	// An excluded accelerator was never measured, so no fallow duration exists
+	// An excluded accelerator was never measured, so no unused duration exists
 	// for it. It is charged for the time it existed, which is what the cluster
 	// actually paid, and is the honest way to keep it visible rather than
 	// letting unmeasurable capacity quietly leave the denominator.
@@ -100,15 +100,15 @@ func BuildLedger(res *api.Result) Ledger {
 
 	l := Ledger{
 		Paid:   res.Scan.GPUHoursPaid,
-		Fallow: res.Scan.GPUHoursFallow,
+		Unused: res.Scan.GPUHoursUnused,
 	}
 
-	fallowAcc := 0
+	unusedAcc := 0
 	for _, f := range res.Recommendations {
-		fallowAcc += acceleratorCount(f)
+		unusedAcc += acceleratorCount(f)
 	}
 
-	l.Residual = l.Paid - notAnalysedHours - byDesignHours - suppressedHours - l.Fallow
+	l.Residual = l.Paid - notAnalysedHours - byDesignHours - suppressedHours - l.Unused
 
 	l.Rows = []LedgerRow{
 		{
@@ -119,7 +119,7 @@ func BuildLedger(res *api.Result) Ledger {
 			Label:        "Unflagged",
 			Note:         "Worked, or idle below the threshold. Not measured as productive.",
 			Hours:        l.Residual,
-			Accelerators: res.Scan.AcceleratorsAnalyzed - byDesignAcc - suppressedAcc - fallowAcc,
+			Accelerators: res.Scan.AcceleratorsAnalyzed - byDesignAcc - suppressedAcc - unusedAcc,
 			Deduction:    true,
 		},
 		{
@@ -132,7 +132,7 @@ func BuildLedger(res *api.Result) Ledger {
 		},
 		{
 			Key:          "by-design",
-			Label:        "Reserved by policy",
+			Label:        "Reserved on purpose",
 			Note:         "Held empty on purpose. Not waste.",
 			Hours:        byDesignHours,
 			Accelerators: byDesignAcc,
@@ -147,11 +147,11 @@ func BuildLedger(res *api.Result) Ledger {
 			Deduction:    true,
 		},
 		{
-			Key:          "fallow",
-			Label:        "Fallow, with an owner",
+			Key:          "unused",
+			Label:        "Unused, with an owner",
 			Note:         "Paid for, did no work, and someone can act on it.",
-			Hours:        l.Fallow,
-			Accelerators: fallowAcc,
+			Hours:        l.Unused,
+			Accelerators: unusedAcc,
 		},
 	}
 
@@ -269,7 +269,7 @@ func apportion(shares []float64) []string {
 
 func sumFindings(fs []api.Finding) (hours float64, accelerators int) {
 	for _, f := range fs {
-		hours += f.Impact.GPUHoursFallow
+		hours += f.Impact.GPUHoursUnused
 		accelerators += acceleratorCount(f)
 	}
 	return hours, accelerators

@@ -367,8 +367,8 @@ func TestSummarise(t *testing.T) {
 		if st.LastNonZero != nil {
 			t.Fatalf("LastNonZero=%v, want nil", st.LastNonZero)
 		}
-		if !st.FallowSince.Equal(start) {
-			t.Fatalf("FallowSince=%v, want the window start %v", st.FallowSince, start)
+		if !st.UnusedSince.Equal(start) {
+			t.Fatalf("UnusedSince=%v, want the window start %v", st.UnusedSince, start)
 		}
 		if st.Completeness != 1 {
 			t.Fatalf("Completeness=%v, want 1", st.Completeness)
@@ -394,8 +394,8 @@ func TestSummarise(t *testing.T) {
 		if st.LastNonZero == nil || !st.LastNonZero.Equal(at(3, 0).T) {
 			t.Fatalf("LastNonZero=%v, want the sample at index 3", st.LastNonZero)
 		}
-		if !st.FallowSince.Equal(*st.LastNonZero) {
-			t.Fatal("FallowSince must start at the last real work, not at the window start")
+		if !st.UnusedSince.Equal(*st.LastNonZero) {
+			t.Fatal("UnusedSince must start at the last real work, not at the window start")
 		}
 	})
 

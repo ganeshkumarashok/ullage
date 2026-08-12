@@ -111,14 +111,14 @@ func TestSparkAxisLabelsTheWindowStartAndNow(t *testing.T) {
 // happening again" show; each check must produce prose that actually mentions
 // its own evidence, not a generic fallback that could apply to any check.
 
-func TestMeaningForIdlePodCitesTheMeasuredFallowDuration(t *testing.T) {
+func TestMeaningForIdlePodCitesTheMeasuredUnusedDuration(t *testing.T) {
 	f := &api.Finding{
 		Check:    api.CheckIdlePod,
-		Evidence: api.Evidence{FallowDuration: api.ISODuration(96 * time.Hour)},
+		Evidence: api.Evidence{UnusedDuration: api.ISODuration(96 * time.Hour)},
 	}
 	got := meaning(f)
 	if !strings.Contains(got, "4d") {
-		t.Fatalf("meaning(idle pod) = %q, want it to cite the 4-day fallow duration", got)
+		t.Fatalf("meaning(idle pod) = %q, want it to cite the 4-day unused duration", got)
 	}
 	if strings.Contains(got, "Power draw independently agrees") {
 		t.Fatalf("meaning(idle pod) claimed power agreement with no power evidence present: %q", got)
@@ -160,14 +160,14 @@ func TestMeaningForByDesignUnusedNodeUsesItsOwnRecordedReason(t *testing.T) {
 	}
 }
 
-func TestMeaningForOrdinaryUnusedNodeCitesTheFallowDuration(t *testing.T) {
+func TestMeaningForOrdinaryUnusedNodeCitesTheUnusedDuration(t *testing.T) {
 	f := &api.Finding{
 		Check:    api.CheckUnusedNode,
-		Evidence: api.Evidence{FallowDuration: api.ISODuration(240 * time.Hour)},
+		Evidence: api.Evidence{UnusedDuration: api.ISODuration(240 * time.Hour)},
 	}
 	got := meaning(f)
 	if !strings.Contains(got, "10d") {
-		t.Fatalf("meaning(unused node) = %q, want it to cite the 10-day fallow duration", got)
+		t.Fatalf("meaning(unused node) = %q, want it to cite the 10-day unused duration", got)
 	}
 }
 
@@ -218,13 +218,13 @@ func explainFixture() (*api.Finding, *api.Result) {
 		},
 		Evidence: api.Evidence{
 			Window:             api.ISODuration(14 * 24 * time.Hour),
-			FallowDuration:     api.ISODuration(96 * time.Hour),
+			UnusedDuration:     api.ISODuration(96 * time.Hour),
 			UtilizationMax:     0,
 			SampleCompleteness: 1,
 			Sparkline:          []float64{0, 0, 0, 0, 0},
 		},
 		Impact: api.Impact{
-			GPUHoursFallow: 96,
+			GPUHoursUnused: 96,
 			WindowCost:     &cost,
 			Currency:       "USD",
 			PricingSource:  "test rates",
@@ -258,7 +258,7 @@ func TestExplainShowsTheWorkloadEvidenceAndFixCommand(t *testing.T) {
 	for _, want := range []string{
 		"ml/notebook-42",
 		"idle-pod",
-		"4d",             // the fallow duration, humanised
+		"4d",             // the unused duration, humanised
 		"kubectl delete", // the fix command
 		"unowned",        // no owner recorded
 	} {

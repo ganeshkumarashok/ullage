@@ -72,9 +72,9 @@ func TestLedgerNumbersReachTheDocument(t *testing.T) {
 // bar that quietly misrepresents the shortfall.
 func TestReportRefusesToChartAnUnreconciledLedger(t *testing.T) {
 	res := htmlFixture()
-	// Claim more fallow hours than were ever paid for. Nothing can divide a
+	// Claim more unused hours than were ever paid for. Nothing can divide a
 	// total into parts larger than itself.
-	res.Scan.GPUHoursFallow = res.Scan.GPUHoursPaid * 3
+	res.Scan.GPUHoursUnused = res.Scan.GPUHoursPaid * 3
 
 	var buf bytes.Buffer
 	if err := HTML(&buf, res, HTMLOptions{}); err != nil {
@@ -173,7 +173,7 @@ func TestOwnerBarsRankByWhatTheyDisplay(t *testing.T) {
 	cheapButLong := 100.0
 	dearButShort := 900.0
 	res.Recommendations[0].Impact.WindowCost = &cheapButLong
-	res.Recommendations[0].Impact.GPUHoursFallow = 800
+	res.Recommendations[0].Impact.GPUHoursUnused = 800
 	res.Recommendations = append(res.Recommendations, api.Finding{
 		Rank:     2,
 		ID:       "idle-pod/team/inference",
@@ -181,8 +181,8 @@ func TestOwnerBarsRankByWhatTheyDisplay(t *testing.T) {
 		Summary:  "team/inference: 1 accelerator held with no work",
 		Workload: api.Workload{Namespace: "team", Kind: "Deployment", Name: "inference", Grouped: 1},
 		Owner:    api.Owner{Identity: "expensive-team", ResolvedVia: "label"},
-		Impact:   api.Impact{GPUHoursFallow: 40, WindowCost: &dearButShort, Currency: "USD"},
-		Evidence: api.Evidence{Window: res.Scan.Window, FallowDuration: res.Scan.Window, SampleCompleteness: 0.99},
+		Impact:   api.Impact{GPUHoursUnused: 40, WindowCost: &dearButShort, Currency: "USD"},
+		Evidence: api.Evidence{Window: res.Scan.Window, UnusedDuration: res.Scan.Window, SampleCompleteness: 0.99},
 		Fix:      api.Fix{Targets: "team/inference"},
 	})
 
@@ -216,17 +216,17 @@ func TestOwnerBarsFallBackToHours(t *testing.T) {
 		Check:    "idle-pod",
 		Workload: api.Workload{Namespace: "team", Kind: "Deployment", Name: "unpriced", Grouped: 1},
 		Owner:    api.Owner{Identity: "no-price-team", ResolvedVia: "label"},
-		Impact:   api.Impact{GPUHoursFallow: 5000}, // deliberately no WindowCost
-		Evidence: api.Evidence{Window: res.Scan.Window, FallowDuration: res.Scan.Window},
+		Impact:   api.Impact{GPUHoursUnused: 5000}, // deliberately no WindowCost
+		Evidence: api.Evidence{Window: res.Scan.Window, UnusedDuration: res.Scan.Window},
 		Fix:      api.Fix{Targets: "team/unpriced"},
 	})
 
 	bars, _, measure := ownerBars(res, HTMLOptions{})
-	if measure != "fallow accelerator-hours" {
+	if measure != "unused accelerator-hours" {
 		t.Fatalf("measure = %q, want the hours fallback when an owner has no price", measure)
 	}
 	if bars[0].Name != "no-price-team" {
-		t.Errorf("first bar is %q; the owner with the most fallow hours should lead", bars[0].Name)
+		t.Errorf("first bar is %q; the owner with the most unused hours should lead", bars[0].Name)
 	}
 }
 
@@ -253,7 +253,7 @@ func barSegments(t *testing.T, doc string) []segment {
 }
 
 // htmlFixture is a small cluster whose ledger reconciles exactly:
-// 2688 paid = 336 not-analysable + 672 by-design + 840 fallow + 840 residual.
+// 2688 paid = 336 not-analysable + 672 by-design + 840 unused + 840 residual.
 func htmlFixture() *api.Result {
 	const window = api.ISODuration(336 * 3600 * 1e9)
 	cost := 840.0
@@ -267,7 +267,7 @@ func htmlFixture() *api.Result {
 			AcceleratorsObserved: 8,
 			AcceleratorsAnalyzed: 7,
 			GPUHoursPaid:         2688,
-			GPUHoursFallow:       840,
+			GPUHoursUnused:       840,
 		},
 		Recommendations: []api.Finding{{
 			Rank:     1,
@@ -277,8 +277,8 @@ func htmlFixture() *api.Result {
 			Because:  "held 2 accelerators and did no work on them",
 			Workload: api.Workload{Namespace: "team", Kind: "Deployment", Name: "trainer", Grouped: 1},
 			Owner:    api.Owner{Identity: "team-a", ResolvedVia: "label"},
-			Impact:   api.Impact{GPUHoursFallow: 840, WindowCost: &cost, Currency: "USD"},
-			Evidence: api.Evidence{Window: window, FallowDuration: window, SampleCompleteness: 0.99},
+			Impact:   api.Impact{GPUHoursUnused: 840, WindowCost: &cost, Currency: "USD"},
+			Evidence: api.Evidence{Window: window, UnusedDuration: window, SampleCompleteness: 0.99},
 			Fix: api.Fix{
 				Targets: "team/trainer",
 				Command: "kubectl scale deployment -n team trainer --replicas=0",
@@ -291,8 +291,8 @@ func htmlFixture() *api.Result {
 			Check:    "unused-node",
 			Summary:  "spare capacity held deliberately",
 			Workload: api.Workload{Kind: "Node", Name: "spare"},
-			Impact:   api.Impact{GPUHoursFallow: 672},
-			Evidence: api.Evidence{Window: window, FallowDuration: window, SampleCompleteness: 1},
+			Impact:   api.Impact{GPUHoursUnused: 672},
+			Evidence: api.Evidence{Window: window, UnusedDuration: window, SampleCompleteness: 1},
 		}},
 		NotAnalyzed: []api.Exclusion{{
 			Code:         "mig-mixed",

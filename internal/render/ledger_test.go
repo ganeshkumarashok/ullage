@@ -19,30 +19,30 @@ func ledgerResult() *api.Result {
 			AcceleratorsObserved: 68,
 			AcceleratorsAnalyzed: 60,
 			GPUHoursPaid:         68 * 336,
-			GPUHoursFallow:       5856,
+			GPUHoursUnused:       5856,
 		},
 		Recommendations: []api.Finding{
 			{
 				Accelerators: []api.Accelerator{{Model: "NVIDIA-A100-SXM4-80GB", Count: 3}},
-				Impact:       api.Impact{GPUHoursFallow: 1008},
+				Impact:       api.Impact{GPUHoursUnused: 1008},
 			},
 			{
 				Accelerators: []api.Accelerator{{Model: "NVIDIA-L4", Count: 8}},
-				Impact:       api.Impact{GPUHoursFallow: 2688},
+				Impact:       api.Impact{GPUHoursUnused: 2688},
 			},
 			{
 				Accelerators: []api.Accelerator{{Model: "NVIDIA-L40S", Count: 4}},
-				Impact:       api.Impact{GPUHoursFallow: 1056},
+				Impact:       api.Impact{GPUHoursUnused: 1056},
 			},
 			{
 				Accelerators: []api.Accelerator{{Model: "NVIDIA-A100-SXM4-80GB", Count: 5}},
-				Impact:       api.Impact{GPUHoursFallow: 1104},
+				Impact:       api.Impact{GPUHoursUnused: 1104},
 			},
 		},
 		ByDesign: []api.Finding{
 			{
 				Accelerators: []api.Accelerator{{Model: "NVIDIA-H100-SXM5-80GB", Count: 16}},
-				Impact:       api.Impact{GPUHoursFallow: 5376},
+				Impact:       api.Impact{GPUHoursUnused: 5376},
 			},
 		},
 		Suppressed: []api.Finding{},
@@ -72,7 +72,7 @@ func TestLedgerReconcilesToPaidCapacity(t *testing.T) {
 	}
 
 	// Hand-computed: 22,848 paid − 2,688 unmeasurable − 5,376 by design
-	// − 0 suppressed − 5,856 fallow = 8,928.
+	// − 0 suppressed − 5,856 unused = 8,928.
 	if l.Residual != 8928 {
 		t.Errorf("residual = %.1f, want 8928", l.Residual)
 	}
@@ -81,7 +81,7 @@ func TestLedgerReconcilesToPaidCapacity(t *testing.T) {
 		"not-analysed": 2688,
 		"by-design":    5376,
 		"suppressed":   0,
-		"fallow":       5856,
+		"unused":       5856,
 		"residual":     8928,
 	}
 	for _, r := range l.Rows {
@@ -108,7 +108,7 @@ func TestLedgerResidualDoesNotClaimTheCapacityWasUsed(t *testing.T) {
 	}
 	// The label is the headline claim, and it is read on its own — in the
 	// chart legend, in the accessible description, and in the table. It may
-	// not assert productivity, because ullage measures fallow hours and never
+	// not assert productivity, because ullage measures unused hours and never
 	// measures productive ones.
 	for _, banned := range []string{"used", "utilized", "utilised", "productive", "busy", "worked", "active"} {
 		if containsFold(row.Label, banned) {
@@ -127,8 +127,8 @@ func TestLedgerResidualDoesNotClaimTheCapacityWasUsed(t *testing.T) {
 // than show bars that do not add up.
 func TestLedgerRefusesToReconcileWhenFindingsOverlap(t *testing.T) {
 	res := ledgerResult()
-	// Double-count: claim the same hours again as fallow.
-	res.Scan.GPUHoursFallow = 20000
+	// Double-count: claim the same hours again as unused.
+	res.Scan.GPUHoursUnused = 20000
 
 	l := BuildLedger(res)
 

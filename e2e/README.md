@@ -50,7 +50,7 @@ ullage --prometheus http://127.0.0.1:9090 --window 10m --idle-threshold 2m --ste
 
 - `ml/idle-notebook-0` is reported, holding **1** GPU
 - `ml/llama-train-0` is **absent** — it is at 78% utilization
-- the second node pool appears under *Fallow by design*, because the cluster
+- the second node pool appears under *Unused by design*, because the cluster
   autoscaler really is holding a floor of 2
 
 Run it again with `--window 14d`. The verdict must not change. Two different

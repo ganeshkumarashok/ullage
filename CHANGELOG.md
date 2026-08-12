@@ -1,5 +1,52 @@
 # Changelog
 
+## Renaming "fallow" to "unused", and cutting the README down
+
+Goal: two reader complaints. Nobody knows what "fallow" means, and the README
+read as padded and self-satisfied in places.
+
+Vocabulary. "Fallow" was on the headline number and a table column, so it was
+unavoidable for a first-time reader. Renamed to "unused" everywhere, including
+the JSON fields `fallowDuration` -> `unusedDuration` and `gpuHoursFallow` ->
+`gpuHoursUnused`. That breaks the wire format, so `api.Version` moved to
+`ullage.dev/v0.2`. The name of the tool stays; it is now the repo, the module
+path, the image and a released tag, and the definition moved from line 718 to
+the top of the README where it is actually read.
+
+One concept had three different names: the CLI said "Fallow by design", the
+ledger said "Reserved by policy", the HTML said "Empty on purpose". All three
+are now "Reserved on purpose".
+
+Two bugs found while doing it, both of which had shipped:
+
+- The README quoted "Unused by design" but the code printed "Reserved on
+  purpose". The headline test pinned only the summary and census lines, so the
+  rest of the transcript could rot unnoticed. Added
+  `TestREADMEShowsTheSectionsTheDemoActuallyPrints`, which asserts every section
+  heading the demo prints appears in the README.
+- Nothing checked relative links between markdown files, only `#anchor` links in
+  three files. Added `TestRelativeLinksResolve` across every `.md` in the repo.
+  Both tests were mutation-proven by reintroducing the exact bug.
+
+Prose. The README was 5,120 words; a good one is about 1,200. Moved the
+reference material into `docs/output.md`, `docs/suppressing.md`, `docs/costs.md`
+and `docs/developing.md`, leaving the front page as the pitch. Now 3,800 words.
+Cut the recurring tics: verb tricolons, "X is not Y" antithesis, aphoristic
+section openers, and self-congratulation ("which is the interesting part").
+The GitHub description had the same tricolon and was stale; rewritten.
+
+Failed attempt worth recording: the first pass renamed only `.go/.tmpl/.css/
+.md/.yaml`, which missed `docs/hero.svg`, `examples/tour.sh` and
+`examples/weekly-digest.sh`. The last of those broke `make check` with a jq
+error about dividing null, because it still read `gpuHoursFallow`.
+
+Files: `README.md`, `ROADMAP.md`, `docs/{output,suppressing,costs,developing}.md`
+(new), `docs/hero.svg`, `pkg/ullage/api/api.go`, `internal/render/*`,
+`internal/check/unusedhours_test.go` (renamed), `cmd/ullage/{docs,readme}_test.go`,
+`examples/*`.
+
+Next: cut the v0.2.0 tag.
+
 ## Saying how it measures, in both the README and the report
 
 Goal: a reader asked how the numbers are produced and could not find out. The

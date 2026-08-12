@@ -9,7 +9,7 @@ import (
 	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
 
-// The same overstatement TestGroupedFallowHoursAreSummedNotMultiplied pins for
+// The same overstatement TestGroupedUnusedHoursAreSummedNotMultiplied pins for
 // idle-pod, in the check that never populated the field built to prevent it.
 //
 // Two pods of one Deployment are wedged: one for a fortnight, one for an hour.
@@ -39,8 +39,8 @@ func TestStuckPodGroupedHoursAreSummedNotMultiplied(t *testing.T) {
 	}
 
 	const want = 336 + 1
-	if got := found[0].FallowHours; got != want {
-		t.Fatalf("FallowHours = %.0f, want %d.\n"+
+	if got := found[0].UnusedHours; got != want {
+		t.Fatalf("UnusedHours = %.0f, want %d.\n"+
 			"One device wedged 336h beside one wedged 1h is %d device-hours. "+
 			"%.0f is the group's longest stall billed against both devices, which "+
 			"nearly doubles the reported waste and outranks findings that are real.",
@@ -73,8 +73,8 @@ func TestStuckPodCapsEachPodAtTheWindow(t *testing.T) {
 	}
 
 	const want = 336 + 24 // the 30d pod contributes only the 14d window
-	if got := found[0].FallowHours; got != want {
-		t.Fatalf("FallowHours = %.0f, want %d: a pod cannot waste more time than was examined", got, want)
+	if got := found[0].UnusedHours; got != want {
+		t.Fatalf("UnusedHours = %.0f, want %d: a pod cannot waste more time than was examined", got, want)
 	}
 }
 
@@ -100,7 +100,7 @@ func TestStuckPodIgnoresTerminalPods(t *testing.T) {
 	}
 }
 
-// Each node's fallow time is capped at the window before it joins the total.
+// Each node's unused time is capped at the window before it joins the total.
 // Scaling the finished aggregate instead shrinks the nodes that were already
 // inside the window to pay for the one that was not.
 //
@@ -129,8 +129,8 @@ func TestUnusedNodeCapsEachNodeBeforeSumming(t *testing.T) {
 	}
 
 	const want = 336 + 168
-	if got := found[0].FallowHours; got != want {
-		t.Fatalf("FallowHours = %.0f, want %d.\n"+
+	if got := found[0].UnusedHours; got != want {
+		t.Fatalf("UnusedHours = %.0f, want %d.\n"+
 			"The 28d node contributes the 14d window (336h) and the 7d node contributes 168h. "+
 			"%.0f is the aggregate scaled down by window/oldest, which charges the newer "+
 			"node for the older one being outside the window.",

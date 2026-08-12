@@ -6,7 +6,7 @@
 ## What the finding claims
 
 Only this: **no kernel was resident on these devices at any sampled moment in
-the fallow span the finding names.**
+the unused span the finding names.**
 
 The span is the trailing run of zeroes, not the whole window. A pod that worked
 nine days ago and has read exactly zero since is idle now, and a rule demanding
@@ -40,7 +40,7 @@ The device did nothing.
    however completely it was watched, so a window-relative floor would discard
    every young pod — and "someone started an expensive pod last week and forgot
    it" is the most actionable finding here.
-5. Require that fallow span to be at least `--idle-threshold` (default `24h`),
+5. Require that unused span to be at least `--idle-threshold` (default `24h`),
    and no longer than the pod has existed.
 
 A pod that fails any of 3–5 is not reported. There is no partial credit and no
@@ -62,7 +62,7 @@ check never emits `low`.
 | Sample coverage at or above 95% | A gap wide enough to hide a working period |
 | A power series exists for every device | One sensor agreeing with itself is not corroboration |
 | Mean power draw below the idle fraction of TDP | A device drawing real power is doing something the utilization metric did not see |
-| Zero throughout the window, or a fallow span of at least half of it | A short run of zeroes near the end of a long window leans on the query resolution |
+| Zero throughout the window, or a unused span of at least half of it | A short run of zeroes near the end of a long window leans on the query resolution |
 
 `--min-confidence` (default `medium`) sets what is shown. Raise it to `high`
 when you are about to act in bulk. Power draw is what separates "the metric
@@ -133,5 +133,5 @@ See [Suppressing](../../README.md#suppressing) for the id-matching rules.
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--window` | `14d` | Period examined |
-| `--idle-threshold` | `24h` | Minimum fallow span before reporting |
+| `--idle-threshold` | `24h` | Minimum unused span before reporting |
 | `--min-confidence` | `medium` | Confidence floor for display |

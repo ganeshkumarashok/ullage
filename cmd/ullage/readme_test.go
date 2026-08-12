@@ -186,7 +186,7 @@ func firstLine(s string) string {
 }
 
 // The `ullage demo` summary at the top of the README carried "5.9k of 23k
-// accelerator-hours fallow (26%)" for a while after the paid-hours arithmetic
+// accelerator-hours unused (26%)" for a while after the paid-hours arithmetic
 // started charging nodes for the time they existed rather than for the whole
 // window. Nothing caught it: the explain transcript was pinned, and `make
 // check` only asserted that the demo exits cleanly, never that it printed what
@@ -208,10 +208,10 @@ func TestREADMEHeadlineMatchesTheDemo(t *testing.T) {
 	}
 	readme := string(raw)
 
-	summary := regexp.MustCompile(`(?m)^\s*[\d.]+k? of [\d.]+k? accelerator-hours fallow \(\d+%\)\s*$`)
+	summary := regexp.MustCompile(`(?m)^\s*[\d.]+k? of [\d.]+k? accelerator-hours unused \(\d+%\)\s*$`)
 	line := summary.FindString(actual)
 	if line == "" {
-		t.Fatalf("the demo no longer prints a fallow summary line; this test can no "+
+		t.Fatalf("the demo no longer prints a unused summary line; this test can no "+
 			"longer pin the README headline.\n\n%s", actual)
 	}
 	want := strings.TrimSpace(line)
@@ -229,5 +229,42 @@ func TestREADMEHeadlineMatchesTheDemo(t *testing.T) {
 	census := regexp.MustCompile(`(?m)^\s*\d+ of \d+ accelerators analysed.*$`)
 	if c := strings.TrimSpace(census.FindString(actual)); c != "" && !strings.Contains(readme, c) {
 		t.Errorf("the demo prints %q, which appears nowhere in the README", c)
+	}
+}
+
+// Every section heading the demo prints has to appear in the README transcript.
+//
+// Renaming a label in the renderer used to leave the front page quoting output
+// the tool no longer produced. It happened with "Unused by design", which the
+// code had started printing as "Reserved on purpose": the headline test pinned
+// only the summary and census lines, so nothing noticed that the rest of the
+// transcript had gone stale.
+func TestREADMEShowsTheSectionsTheDemoActuallyPrints(t *testing.T) {
+	t.Setenv("ULLAGE_DEMO_NOW", readmeDemoNow)
+	actual := captureStdout(t, func() {
+		if err := run([]string{"demo", "--exit-zero"}); err != nil {
+			t.Fatalf("running the demo: %v", err)
+		}
+	})
+
+	raw, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatalf("read README: %v", err)
+	}
+	readme := string(raw)
+
+	heading := regexp.MustCompile(`(?m)^  [A-Z][a-z].*$`)
+	found := heading.FindAllString(actual, -1)
+	if len(found) == 0 {
+		t.Fatal("the demo printed no section headings; this test can no longer pin anything")
+	}
+
+	for _, h := range found {
+		if !strings.Contains(readme, strings.TrimRight(h, " ")) {
+			t.Errorf("the demo prints %q, which appears nowhere in the README.\n"+
+				"Regenerate the transcript with:\n"+
+				"  ULLAGE_DEMO_NOW=%s go run ./cmd/ullage demo --exit-zero",
+				strings.TrimSpace(h), readmeDemoNow)
+		}
 	}
 }

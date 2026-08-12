@@ -12,17 +12,16 @@
 
 <p align="center">
   <img src="docs/hero.svg" width="100%"
-       alt="Three nodes whose accelerators are all allocated. Eleven of the twelve did no GPU work for fourteen days, but four of those are held open deliberately by an autoscaler minimum, so they are shown and never counted as waste. Cluster-wide: 5.9k of 22k accelerator-hours fallow.">
+       alt="Three nodes whose accelerators are all allocated. Eleven of the twelve did no GPU work for fourteen days, but four of those are held open deliberately by an autoscaler minimum, so they are shown and never counted as waste. Cluster-wide: 5.9k of 22k accelerator-hours unused.">
 </p>
 
-<p align="center"><em>Allocated is not the same as used. Unused is not the same as wasted.<br>The gap between them is the thing this measures.</em></p>
+`ullage` finds GPUs your cluster pays for but nothing uses. For each one you get
+the evidence, the owner, and the command that frees it.
 
-`ullage` measures the accelerator capacity a Kubernetes cluster is paying for
-and not using, attributes it to the workload and the person responsible, and
-gives you the next command to run — the one that frees the capacity where that
-is safe, and the one that identifies what is blocking it where it is not.
+It only reads. It cannot change your cluster.
 
-It is a measurement, not a verdict. It never writes to your cluster.
+*"Ullage" is the empty space in a wine barrel: capacity you paid for and didn't
+fill.*
 
 **[Thirty seconds](#thirty-seconds)** ·
 [How it measures](#how-it-measures) ·
@@ -32,8 +31,7 @@ It is a measurement, not a verdict. It never writes to your cluster.
 [Install](#install) ·
 [Use it for real](#use-it-for-real) ·
 [Checks](#checks) ·
-[Adding a check](#adding-a-check) ·
-[Suppressing](#suppressing)
+[Reference](#reference)
 
 ## Thirty seconds
 
@@ -47,7 +45,7 @@ $ make demo
 ```
 ullage v0.1.0  demo  window 14d
 
-  5.9k of 22k accelerator-hours fallow (27%)
+  5.9k of 22k accelerator-hours unused (27%)
   60 of 68 accelerators analysed  (8 excluded, see below)
 
       WORKLOAD                      GPUS   ULLAGE    FOR OWNER           
@@ -80,7 +78,7 @@ ullage v0.1.0  demo  window 14d
       CrashLoopBackOff
       ~$326  ·  1 × NVIDIA-A100-SXM4-80GB
 
-  Fallow by design
+  Reserved on purpose
   16 accelerators, 5.4k — held empty on purpose, not counted as waste
     · pool/h100-reserve: 16 accelerators on pool/h100-reserve are held empty deliberately
       pool/h100-reserve is held at a minimum of 2 nodes by the cluster
@@ -139,7 +137,7 @@ $ ./bin/ullage explain research/jupyter-alice --demo
 
   Evidence
     Window           14d ending 11 Aug 2026 07:00 UTC
-    Fallow for       14d
+    Unused for       14d
     Last GPU work    none within the window
     Peak utilization 0% across the whole window
     Power draw       56 W mean (14% of 400 W TDP)
@@ -158,7 +156,7 @@ $ ./bin/ullage explain research/jupyter-alice --demo
 
   Accelerators
     Held             3 × NVIDIA-A100-SXM4-80GB (exclusive)
-    Fallow           1.0k accelerator-hours
+    Unused           1.0k accelerator-hours
     Cost             ~$3,427 over the window
                  built-in list prices (approximate; override with --pricing) rate for NVIDIA-A100-SXM4-80GB; ullage never blends rates across models
 
@@ -206,14 +204,14 @@ the same demo cluster, and none of them touch anything real:
 
 | run this | and you see |
 |---|---|
-| `make tour` | the two-minute version of the whole idea, including what the tool deliberately refuses to claim — which is the interesting part |
+| `make tour` | the two-minute version of the whole idea, including what the tool refuses to claim |
 | [`examples/ci-gate.sh`](examples/ci-gate.sh) | a build failing when waste goes over a budget, and why a scan that broke must not exit like a scan that found nothing |
 | [`examples/weekly-digest.sh`](examples/weekly-digest.sh) | one scan turned into a Markdown report grouped by owner, with `jq` |
 
 ## How it measures
 
-Four stages. Each one is allowed to answer *"I don't know"*, and the interesting
-engineering is in what makes it refuse.
+Four stages. Each one is allowed to answer *"I don't know"*, and most of the
+work goes into making it refuse when it should.
 
 ```
    Kubernetes API                   Prometheus
@@ -244,10 +242,9 @@ leaves the accounting; it appears as **No usable metric**.
 `DCGM_FI_DEV_GPU_UTIL` reports SM activity alone, and a device can read exactly
 zero for a fortnight while doing continuous, expensive, real work: a video
 pipeline living on NVENC/NVDEC, a data loader saturating the copy engines, or a
-model held resident in framebuffer — which is the entire point of a warm
-replica, and precisely what someone would be furious to have scaled to zero. So
-four more series are consulted, all of them in dcgm-exporter's default counter
-set:
+model held resident in framebuffer, which is the point of a warm replica and
+exactly what someone would be furious to have scaled to zero. So four more
+series are consulted, all of them in dcgm-exporter's default counter set:
 
 | series | catches |
 |---|---|
@@ -262,7 +259,7 @@ from a different sensor entirely. If a series is missing the scan says so in a
 warning, rather than quietly narrowing what "no work" means.
 
 **3. Judge — a duration, and the right to refuse.**
-Fallow time is the trailing run of zeros up to now, not an average and not the
+Unused time is the trailing run of zeros up to now, not an average and not the
 age of the object. The rules that stop a number from being produced matter more
 than the arithmetic:
 
@@ -286,10 +283,10 @@ than the arithmetic:
 Ownership resolves pod → controller → namespace, taking the first of
 `ullage.dev/owner`, `owner`, `app.kubernetes.io/owner` or `team`, then contact
 annotations; node-level findings fall back to the node pool. Every finding
-records *how* it was resolved, so a wrong attribution is debuggable rather than
-infuriating. `app.kubernetes.io/managed-by` is deliberately **not** consulted —
-it names the deploying tool, and "go talk to Helm" helps nobody. `unowned` is a
-first-class answer, because a device nobody claims is itself the finding.
+records *how* it was resolved, so a wrong attribution can be traced.
+`app.kubernetes.io/managed-by` is **not** consulted: it names the deploying
+tool, and "go talk to Helm" helps nobody. `unowned` is a first-class answer,
+because a device nobody claims is itself the finding.
 
 Hours become money by multiplying accelerator-hours by a per-SKU rate; rates are
 approximate list prices unless you supply your own with `--pricing`, and the
@@ -325,7 +322,7 @@ command at all**, because refusing to guess is worth more than a plausible
 command that does the wrong thing.
 
 **It separates deliberate from wasteful.** Capacity held empty by an autoscaler
-minimum is reserved, not wasted. It appears under *fallow by design*, with no
+minimum is reserved, not wasted. It appears under *unused by design*, with no
 removal command attached. Printing reserved capacity in the same list as waste
 is the fastest way for a tool to be dismissed as not understanding the business.
 
@@ -441,7 +438,7 @@ pods to nobody, it warns and names the kind, so the missing grant is a two-line
 edit instead of a mystery.
 
 The CronJob runs weekly, not hourly, and that is deliberate: `ullage` measures a
-two-week window and reports capacity that has been fallow for days. Running it
+two-week window and reports capacity that has been unused for days. Running it
 sixty times to produce the same seven findings is how a tool becomes background
 noise.
 
@@ -490,63 +487,12 @@ The fact layer is vendor-neutral by construction — checks never see a
 Kubernetes or Prometheus type — so adding AMD's `device-metrics-exporter` is a
 change to one file. Nobody has done it yet, and this table says so rather than
 letting the architecture imply a capability that does not exist.
-
 ## Output
 
-`--output html` writes a single self-contained file: no network requests, no
-scripts required to read it, and every number derived from the same scan the
-terminal printed. It opens with a capacity ledger that accounts for the whole
-window — what could not be analysed, what is idle by design, what was flagged,
-and what is left — so the figure at the top can be checked against its parts
-rather than taken on trust. It is meant for the conversation that follows a
-scan, where the person who has to approve a change was not the person who ran
-it.
-
-```console
-$ ullage demo --output html > report.html
-```
-
-Add `--redact` when it leaves your hands. Namespaces, workload names and owner
-identities are replaced everywhere they appear — including inside summaries,
-`kubectl` commands and link anchors — while the grouping and the arithmetic
-stay intact, so the report still argues its case without naming anyone.
-
-`--output json` emits a versioned, stable document (`ullage.dev/v0.1`) defined
-in [`pkg/ullage/api`](pkg/ullage/api). It records the effective thresholds, the
-window, and the accelerator census, so two results can be honestly compared. Add
-`--trace` and it also records every PromQL query it sent, which is what you want
-when somebody disputes a number.
-
-Exit codes: `0` nothing found, `1` findings present, `2` the scan could not
-complete. Suitable as a CI gate. Use `--exit-zero` where a finding is not a
-failure — a CronJob, for instance, where exit 1 turns every successful scan
-into a failed Job.
-
-Embed it directly:
-
-```go
-res, err := ullage.Scan(ctx, ullage.Options{
-    Prometheus: ullage.PrometheusOptions{URL: promURL},
-})
-```
-
-The wire shape is pinned by a golden file,
-[`pkg/ullage/api/testdata/contract.txt`](pkg/ullage/api/testdata/contract.txt).
-Consumers do not compile against this package, so the Go type system protects
-nobody: renaming a JSON tag is invisible in review here and fatal in someone
-else's dashboard weeks later. Any rename, removal, retype — or addition — fails
-the test. Additions are a deliberate false alarm, because updating the golden
-file is the right moment to ask whether `apiVersion` should move:
-
-```console
-UPDATE_GOLDEN=1 go test ./pkg/ullage/api/
-```
-
-The top-level result lists — `recommendations`, `byDesign`, `suppressed`,
-`notAnalyzed`, `warnings` — always serialise as `[]`, never `null`. A consumer
-iterating `suppressed` or `warnings` would otherwise break on exactly the
-healthiest clusters, and never in a demo. Optional nested lists inside a finding
-are `omitempty` and may be absent, so read those defensively.
+`ullage` prints a table. `--output html` writes a self-contained report to hand
+to whoever approves the change. `--output json` emits a versioned document for
+dashboards and CI. Exit codes: `0` nothing found, `1` findings present, `2` the
+scan could not complete.
 
 ## Checks
 
@@ -554,169 +500,31 @@ are `omitempty` and may be absent, so read those defensively.
 |---|---|
 | [`idle-pod`](docs/checks/idle-pod.md) | Pods holding accelerators that have read exactly zero for longer than the threshold |
 | [`stuck-pod`](docs/checks/stuck-pod.md) | Pods holding accelerators whose containers are not running (crash loops, image pull failures, wedged init) |
-| [`unused-node`](docs/checks/unused-node.md) | Accelerator nodes nothing has been scheduled on — and what is stopping the autoscaler from reclaiming them |
+| [`unused-node`](docs/checks/unused-node.md) | Accelerator nodes nothing has been scheduled on, and what is stopping the autoscaler from reclaiming them |
 
-`ullage checks` prints each one's claim and its risk. Every finding links to its
-[check page](docs/checks/), which spells out how the check is measured and —
-the section worth reading before you act on a batch — when it is wrong.
+`ullage checks` prints each one's claim and its risk. Every check page says how
+the check is measured and when it is wrong. Read that before acting on a batch.
 
-## Adding a check
+## Reference
 
-A check is one file. It reads a normalized fact layer — no Kubernetes types, no
-Prometheus types — and returns what it saw. Ownership, provenance, the fix
-command, grouping, ranking, pricing and rendering all happen downstream, so a
-new check inherits the entire pipeline for free:
-
-```go
-type MyCheck struct{}
-
-func (MyCheck) Describe() check.Descriptor        { ... }
-func (MyCheck) Applicable(d inventory.Device) bool { ... }
-func (MyCheck) Run(ctx context.Context, cl *inventory.Cluster, p check.Params) ([]check.RawFinding, error)
-
-func init() { check.Register(MyCheck{}) }
-```
-
-`Describe` requires you to state both what the check **claims** and the **risk**
-of acting on it. A check with nothing to warn about has not thought about being
-wrong.
-
-Because checks read facts, their tests are literals — no server, no fixtures.
-See [`internal/check/check_test.go`](internal/check/check_test.go).
-
-## Suppressing
-
-Every scanner produces findings its owners have consciously accepted. A tool
-with no way to record that gets muted or wrapped in a `grep`, and either way the
-decision is lost, so the next person rediscovers the finding and reopens the
-argument.
-
-`ullage explain` prints the exact command, including the finding id:
-
-```console
-$ ullage explain research/jupyter-alice
-...
-  Suppress: ullage ignore idle-pod/research/jupyter-alice --reason "..." --until 2026-11-11
-```
-
-Which writes to `.ullage.yaml`:
-
-```yaml
-suppress:
-  - id: "idle-pod/research/jupyter-alice"
-    reason: "reserved for the Q3 eval"
-    until: "2026-11-11"
-```
-
-Ids are slash-separated, so `*` works per segment — `unused-node/pool/*` for one
-check across every pool, `*/research/*` for one namespace. A `*` never crosses a
-`/`, because the difference between "cluster-scoped" and "every namespace" is a
-lot of hidden findings.
-
-Four rules, each of which exists because the alternative is silent:
-
-- **A reason is required.** Six months later it is indistinguishable from a
-  mistake, and the person judging it is rarely the person who wrote it.
-- **Expired entries stop applying and are named.** An expiry that quietly
-  renews itself is not an expiry. Nothing is ever rewritten for you.
-- **Entries that match nothing are reported.** Either the id is wrong and you
-  are not suppressing what you think, or the problem is fixed and the entry is
-  litter.
-- **The suppressed total is printed with its size**, not as a bare count:
-
-  ```
-  1 finding suppressed by .ullage.yaml (1.0k accelerator-hours, ~$3,427).
-  ```
-
-  Suppression records a decision. It is not a way to make a cluster look clean.
-
-A malformed file is a hard error rather than a warning — continuing would print
-findings you asked not to see, and you would read that as the feature being
-broken rather than the file.
-
-Use `--config` to point at a different file; `ullage ignore --config` writes to
-the same one. Embedders pass `ullage.Options.ConfigFile`, which is empty by
-default: a library call will not reach into whatever directory its process
-happens to have started in.
-
-## Costs
-
-Costs use built-in approximate list prices and are wrong for almost everyone —
-reservations, savings plans, spot and negotiated discounts all move them, often
-by more than half. Override with `--pricing`, or drop them with `--no-cost`.
-Every report names the rate source it used, so a reader always knows whether the
-money came from finance or from a built-in guess. Rates are never blended
-across models: an
-H100 and a T4 differ roughly tenfold, so a single averaged rate is a fabricated
-number wearing a decimal point.
-
-## Developing
-
-`ullage` depends on one third-party Go module ([`yaml.v3`](https://gopkg.in/yaml.v3)).
-There is no client-go, no controller-runtime, and no vendored Kubernetes tree —
-it speaks to the API server over ordinary HTTP(S) with the types it needs. A clone
-builds in a few seconds and the test suite runs without a cluster.
-
-```console
-make check        # fmt, vet, and the full race-enabled test suite
-make cover        # tests with a coverage profile, then open the HTML report
-make demo         # the transcript at the top of this file
-make tour         # the narrated walkthrough
-```
-
-The example scripts are exercised by `make check` too, so a change that breaks
-one is caught before it is documented as working.
-
-### Testing against a real cluster
-
-Everything above runs against in-memory fakes. `e2e/kind.sh` runs the whole
-thing against a genuine Kubernetes cluster instead — a three-node
-[kind](https://kind.sigs.k8s.io) cluster with fake accelerator capacity, a real
-Prometheus, and a synthetic exporter that reports one busy pod and one idle one:
-
-```console
-make e2e-kind          # create, deploy, scan, assert; ~3 minutes
-./e2e/kind.sh scan     # re-run just the scan against a cluster already up
-./e2e/kind.sh rbac     # run ullage in-cluster with only deploy/rbac.yaml
-make e2e-kind-down     # delete it
-```
-
-It asserts on behaviour, not on output: the idle pod must be reported, the busy
-pod must **not** be, the accelerator census must reconcile, and the idle finding
-must be attributed to exactly one device.
-
-`./e2e/kind.sh rbac` is worth calling out. It builds the image, applies
-[`deploy/rbac.yaml`](deploy/rbac.yaml), and runs a scan inside the cluster as
-that ServiceAccount and nothing else. Developer kubeconfigs are usually
-cluster-admin, so a check that starts reading a new resource passes every other
-test and then fails only for the people who installed the published manifest.
-This is the test that catches it.
-
-The script waits for real sample coverage rather than sleeping, so it is
-deterministic on a slow machine. It needs `kind`, `kubectl`, `docker` and
-`python3`.
+- [Output formats, exit codes and the JSON contract](docs/output.md)
+- [Suppressing findings](docs/suppressing.md)
+- [Costs and pricing](docs/costs.md)
+- [Developing and adding a check](docs/developing.md)
 
 ## Status
 
-v0.1, and honest about it. The claims are deliberately narrow, the exclusions
-are deliberately loud, and the fixes are deliberately conservative.
+v0.2, with three checks and a stable JSON output format.
 
-The JSON document described under [Output](#output) is a contract:
-`pkg/ullage/api` round-trips it, and a test compares re-marshalled bytes so a
-field cannot quietly disappear. Fields may be added within v0.x; existing ones
-will not change meaning without a major version. Checks currently live under
-`internal/`, which is deliberate — the three checks here have not yet disagreed
-with each other enough to show where the seams belong, and publishing a plugin
-ABI before they do would freeze the wrong shape. See
-[ROADMAP.md](ROADMAP.md).
+The JSON document is a contract. `pkg/ullage/api` round-trips it and a golden
+file fails on any change to the wire shape. Fields may be added within v0.x;
+existing ones will not change meaning without a major version.
 
-Issues and checks welcome; start with [CONTRIBUTING.md](CONTRIBUTING.md).
+Checks live under `internal/` for now. The three here have not yet disagreed
+with each other enough to show where a plugin boundary belongs, and publishing
+one early would freeze the wrong shape. See [ROADMAP.md](ROADMAP.md).
 
----
-
-*Ullage* (n., /ˈʌlɪdʒ/) — the amount by which a container falls short of being
-full. It is what a shipper calls the space in a cask that was supposed to hold
-wine: capacity bought, shipped, and never filled.
+Issues and checks welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licence
 

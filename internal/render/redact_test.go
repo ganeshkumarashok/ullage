@@ -57,10 +57,10 @@ func TestRedactKeepsTheReportUsable(t *testing.T) {
 		}
 	}
 
-	// The fallow total is a number, not a name, and removing it would defeat
+	// The unused total is a number, not a name, and removing it would defeat
 	// the purpose of sharing the report at all.
-	if !strings.Contains(out, hours(res.Scan.GPUHoursFallow)) {
-		t.Errorf("redacted report lost the fallow total %q", hours(res.Scan.GPUHoursFallow))
+	if !strings.Contains(out, hours(res.Scan.GPUHoursUnused)) {
+		t.Errorf("redacted report lost the unused total %q", hours(res.Scan.GPUHoursUnused))
 	}
 }
 
@@ -211,7 +211,7 @@ func redactFixture() *api.Result {
 			AcceleratorsObserved: 8,
 			AcceleratorsAnalyzed: 8,
 			GPUHoursPaid:         2688,
-			GPUHoursFallow:       672,
+			GPUHoursUnused:       672,
 		},
 		Recommendations: []api.Finding{{
 			Rank:    1,
@@ -227,8 +227,8 @@ func redactFixture() *api.Result {
 				Members:   []string{"finetune-notebook-carol-0"},
 			},
 			Owner:    api.Owner{Identity: "alice@example.com", ResolvedVia: "label"},
-			Impact:   api.Impact{GPUHoursFallow: 672, WindowCost: &cost, Currency: "USD"},
-			Evidence: api.Evidence{Window: api.ISODuration(336 * 3600 * 1e9), FallowDuration: api.ISODuration(336 * 3600 * 1e9), SampleCompleteness: 0.99},
+			Impact:   api.Impact{GPUHoursUnused: 672, WindowCost: &cost, Currency: "USD"},
+			Evidence: api.Evidence{Window: api.ISODuration(336 * 3600 * 1e9), UnusedDuration: api.ISODuration(336 * 3600 * 1e9), SampleCompleteness: 0.99},
 			Fix: api.Fix{
 				Targets:   "ml-platform/finetune-carol",
 				Command:   "kubectl delete pod -n ml-platform finetune-notebook-carol-0",

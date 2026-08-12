@@ -39,7 +39,7 @@ func explainQueries(w io.Writer, queries []string) {
 func purposeOf(q string) string {
 	switch {
 	case strings.Contains(q, "@ range"):
-		return "when work last ran, to date the start of the fallow run"
+		return "when work last ran, to date the start of the unused run"
 	case strings.Contains(q, "count_over_time") && strings.Contains(q, "[1h]"):
 		return "scrape interval, inferred from how many samples land in an hour"
 	case strings.Contains(q, "count_over_time"):

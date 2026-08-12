@@ -320,13 +320,13 @@ func TestCoverageOverASpanShorterThanOneStep(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// FallowFor
+// UnusedFor
 // ---------------------------------------------------------------------------
 
-func TestFallowForRefusesASeriesWithNoSamples(t *testing.T) {
-	s := inventory.Stats{Samples: 0, FallowSince: now.Add(-9 * 24 * time.Hour)}
-	if d, ok := s.FallowFor(now); ok {
-		t.Fatalf("FallowFor = %v, true for a series that returned nothing. Unknown is not "+
+func TestUnusedForRefusesASeriesWithNoSamples(t *testing.T) {
+	s := inventory.Stats{Samples: 0, UnusedSince: now.Add(-9 * 24 * time.Hour)}
+	if d, ok := s.UnusedFor(now); ok {
+		t.Fatalf("UnusedFor = %v, true for a series that returned nothing. Unknown is not "+
 			"idle: an exporter that crashed a week ago would otherwise recommend deleting "+
 			"every GPU in the cluster", d)
 	}
@@ -335,48 +335,48 @@ func TestFallowForRefusesASeriesWithNoSamples(t *testing.T) {
 // Max comes from an aggregate query; LastNonZero from a chunked, downsampled
 // range query. When the aggregate proves work happened and the shape cannot say
 // when, only one of the two readings ends in a deletion.
-func TestFallowForRefusesWhenTheAggregateContradictsTheShape(t *testing.T) {
-	s := inventory.Stats{Samples: 100, Max: 0.78, LastNonZero: nil, FallowSince: now.Add(-9 * 24 * time.Hour)}
-	if d, ok := s.FallowFor(now); ok {
-		t.Fatalf("FallowFor = %v, true for a device the aggregate measured at 78%% peak. "+
+func TestUnusedForRefusesWhenTheAggregateContradictsTheShape(t *testing.T) {
+	s := inventory.Stats{Samples: 100, Max: 0.78, LastNonZero: nil, UnusedSince: now.Add(-9 * 24 * time.Hour)}
+	if d, ok := s.UnusedFor(now); ok {
+		t.Fatalf("UnusedFor = %v, true for a device the aggregate measured at 78%% peak. "+
 			"The shape's silence is missing data, not proof the device was idle", d)
 	}
 }
 
-func TestFallowForAcceptsAGenuinelySilentDevice(t *testing.T) {
-	s := inventory.Stats{Samples: 100, Max: 0, LastNonZero: nil, FallowSince: now.Add(-9 * 24 * time.Hour)}
-	d, ok := s.FallowFor(now)
+func TestUnusedForAcceptsAGenuinelySilentDevice(t *testing.T) {
+	s := inventory.Stats{Samples: 100, Max: 0, LastNonZero: nil, UnusedSince: now.Add(-9 * 24 * time.Hour)}
+	d, ok := s.UnusedFor(now)
 	if !ok {
-		t.Fatal("FallowFor refused a device with samples, a zero peak and a known start; " +
+		t.Fatal("UnusedFor refused a device with samples, a zero peak and a known start; " +
 			"that is exactly the case this tool exists to report")
 	}
 	if d != 9*24*time.Hour {
-		t.Fatalf("FallowFor = %v, want 9 days", d)
+		t.Fatalf("UnusedFor = %v, want 9 days", d)
 	}
 }
 
-func TestFallowForRefusesWorkAtOrAfterNow(t *testing.T) {
+func TestUnusedForRefusesWorkAtOrAfterNow(t *testing.T) {
 	for _, last := range []time.Time{now, now.Add(time.Hour)} {
-		s := inventory.Stats{Samples: 100, LastNonZero: &last, FallowSince: now.Add(-time.Hour)}
-		if d, ok := s.FallowFor(now); ok {
-			t.Errorf("FallowFor = %v, true with work recorded at %v; a device that worked "+
+		s := inventory.Stats{Samples: 100, LastNonZero: &last, UnusedSince: now.Add(-time.Hour)}
+		if d, ok := s.UnusedFor(now); ok {
+			t.Errorf("UnusedFor = %v, true with work recorded at %v; a device that worked "+
 				"at or after the scan instant has not been idle at all", d, last)
 		}
 	}
 }
 
-func TestFallowForRefusesAnUndatedStart(t *testing.T) {
+func TestUnusedForRefusesAnUndatedStart(t *testing.T) {
 	s := inventory.Stats{Samples: 100}
-	if _, ok := s.FallowFor(now); ok {
-		t.Fatal("FallowFor succeeded with a zero FallowSince; without a start instant there " +
+	if _, ok := s.UnusedFor(now); ok {
+		t.Fatal("UnusedFor succeeded with a zero UnusedSince; without a start instant there " +
 			"is no duration to report and no claim to make")
 	}
 }
 
-func TestFallowForRefusesAFutureStart(t *testing.T) {
-	s := inventory.Stats{Samples: 100, FallowSince: now.Add(time.Hour)}
-	if d, ok := s.FallowFor(now); ok {
-		t.Fatalf("FallowFor = %v, true from a start in the future; clock skew must not "+
+func TestUnusedForRefusesAFutureStart(t *testing.T) {
+	s := inventory.Stats{Samples: 100, UnusedSince: now.Add(time.Hour)}
+	if d, ok := s.UnusedFor(now); ok {
+		t.Fatalf("UnusedFor = %v, true from a start in the future; clock skew must not "+
 			"produce a negative or nonsense idle duration", d)
 	}
 }

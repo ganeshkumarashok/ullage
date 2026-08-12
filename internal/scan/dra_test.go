@@ -262,7 +262,7 @@ func TestGatherFailsClosedWhenDRAOccupancyIsUnavailable(t *testing.T) {
 		}
 		for _, f := range found {
 			if c.Describe().ID == "unused-node" {
-				t.Fatalf("unused-node reported %q as fallow while its DRA occupancy was "+
+				t.Fatalf("unused-node reported %q as unused while its DRA occupancy was "+
 					"unreadable; a node that is training a model would be offered for deletion",
 					f.Subject.Name)
 			}

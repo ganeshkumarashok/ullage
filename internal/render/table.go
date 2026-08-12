@@ -25,9 +25,9 @@ func Table(w io.Writer, res *api.Result, o Options) error {
 
 	// The headline. Percentage first because a bare hour count means nothing
 	// without the denominator.
-	pct := res.FallowPercent()
-	p.bold("  %s of %s accelerator-hours fallow (%.0f%%)",
-		hours(res.Scan.GPUHoursFallow), hours(res.Scan.GPUHoursPaid), pct)
+	pct := res.UnusedPercent()
+	p.bold("  %s of %s accelerator-hours unused (%.0f%%)",
+		hours(res.Scan.GPUHoursUnused), hours(res.Scan.GPUHoursPaid), pct)
 
 	// Analysed vs observed deliberately disagree when they should. Silence here
 	// would let a user believe a partial scan was a whole one.
@@ -89,7 +89,7 @@ func (p *printer) renderRows(res *api.Result) {
 	}
 
 	head := fmt.Sprintf("  %-3s %-*s %5s %8s %6s %-*s",
-		"", wWorkload, "WORKLOAD", "GPUS", "ULLAGE", "FOR", wOwner, "OWNER")
+		"", wWorkload, "WORKLOAD", "GPUS", "UNUSED", "FOR", wOwner, "OWNER")
 	p.dim("%s", head)
 
 	for i, f := range rows[:limit] {
@@ -98,8 +98,8 @@ func (p *printer) renderRows(res *api.Result) {
 			marker,
 			wWorkload, truncate(f.Workload.Ref(), wWorkload),
 			f.TotalAccelerators(),
-			hours(f.Impact.GPUHoursFallow),
-			HumanShort(f.Evidence.FallowDuration.Duration()),
+			hours(f.Impact.GPUHoursUnused),
+			HumanShort(f.Evidence.UnusedDuration.Duration()),
 			wOwner, truncate(p.ownerCell(f), wOwner))
 
 		// The second line is the one that makes the row actionable. Without the
@@ -190,10 +190,10 @@ func (p *printer) renderByDesign(res *api.Result) {
 	total := 0.0
 	devices := 0
 	for _, f := range res.ByDesign {
-		total += f.Impact.GPUHoursFallow
+		total += f.Impact.GPUHoursUnused
 		devices += f.TotalAccelerators()
 	}
-	p.line("  Fallow by design")
+	p.line("  Reserved on purpose")
 	p.dim("  %d accelerators, %s — held empty on purpose, not counted as waste",
 		devices, hours(total))
 	for _, f := range res.ByDesign {
@@ -256,7 +256,7 @@ func (p *printer) renderFooter(res *api.Result) {
 		hoursTotal, cost, currency := 0.0, 0.0, ""
 		priced := true
 		for _, f := range res.Suppressed {
-			hoursTotal += f.Impact.GPUHoursFallow
+			hoursTotal += f.Impact.GPUHoursUnused
 			if f.Impact.WindowCost == nil {
 				priced = false
 				continue
@@ -342,7 +342,7 @@ func plural(n int, word string) string {
 // hours formats an accelerator-hour count for people.
 //
 // Small values keep their significant figures. Rounding everything below one to
-// "0" made a short window print "0 of 0 accelerator-hours fallow (75%)", where
+// "0" made a short window print "0 of 0 accelerator-hours unused (75%)", where
 // the two numbers contradict the percentage sitting between them -- and a short
 // window is exactly what someone trying the tool for the first time reaches for.
 func hours(h float64) string {

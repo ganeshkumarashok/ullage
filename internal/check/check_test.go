@@ -38,7 +38,7 @@ func idleStats(since time.Duration, everBusy bool) inventory.Stats {
 		Samples:        40320,
 		Completeness:   1,
 		ZeroThroughout: !everBusy,
-		FallowSince:    now.Add(-since),
+		UnusedSince:    now.Add(-since),
 	}
 	if everBusy {
 		t := now.Add(-since)
@@ -124,7 +124,7 @@ func TestIdlePodRequiresStrictZero(t *testing.T) {
 				Samples: 40320, Completeness: 1, Max: 96, Mean: 4,
 				ZeroThroughout: false,
 				LastNonZero:    ptr(now.Add(-90 * time.Minute)),
-				FallowSince:    now.Add(-90 * time.Minute),
+				UnusedSince:    now.Add(-90 * time.Minute),
 			},
 			found: false,
 			why:   "a low mean is not idleness",
@@ -141,7 +141,7 @@ func TestIdlePodRequiresStrictZero(t *testing.T) {
 			name: "large scrape gap",
 			util: inventory.Stats{
 				Samples: 20000, Completeness: 0.5,
-				ZeroThroughout: true, FallowSince: now.Add(-window),
+				ZeroThroughout: true, UnusedSince: now.Add(-window),
 			},
 			found: false,
 			why:   "a gap could hide a working period",
@@ -515,7 +515,7 @@ func TestUnusedNodeNeverRecommendsDeletingBusyHardware(t *testing.T) {
 
 	t.Run("the reported duration is measured, not the age of the node", func(t *testing.T) {
 		// A month-old node whose accelerators last did work five days ago has
-		// been fallow for five days, not thirty. Billing the node's whole life
+		// been unused for five days, not thirty. Billing the node's whole life
 		// as waste inflates the one number a reader can check by hand.
 		nodes := []inventory.NodeView{
 			{Name: "gpu-0", Pool: "gpu", Accelerators: 4, Ready: true, Age: 30 * 24 * time.Hour},
@@ -530,10 +530,10 @@ func TestUnusedNodeNeverRecommendsDeletingBusyHardware(t *testing.T) {
 		if len(got) != 1 {
 			t.Fatalf("got %d findings, want 1", len(got))
 		}
-		if got[0].Fallow != 5*24*time.Hour {
-			t.Fatalf("fallow duration %s, want 120h: the node age is an upper bound on how "+
+		if got[0].Unused != 5*24*time.Hour {
+			t.Fatalf("unused duration %s, want 120h: the node age is an upper bound on how "+
 				"long it could have been empty, not a measurement of how long it was",
-				got[0].Fallow)
+				got[0].Unused)
 		}
 	})
 
@@ -581,7 +581,7 @@ func TestUnusedNodeDoesNotCallOneSampleAMeasurement(t *testing.T) {
 			Samples:        1,
 			Completeness:   1.0 / 40320.0,
 			ZeroThroughout: true,
-			FallowSince:    now.Add(-window),
+			UnusedSince:    now.Add(-window),
 		}
 		nodes := []inventory.NodeView{
 			{Name: "gpu-0", Pool: "gpu", Accelerators: 4, Ready: true, Age: 30 * 24 * time.Hour},
@@ -615,7 +615,7 @@ func TestUnusedNodeDoesNotCallOneSampleAMeasurement(t *testing.T) {
 		cl.Autoscaler = &inventory.AutoscalerView{Floors: map[string]int{}}
 
 		got := find(t, check.UnusedNode{}, cl)
-		if len(got) != 1 || got[0].Fallow != 5*24*time.Hour {
+		if len(got) != 1 || got[0].Unused != 5*24*time.Hour {
 			t.Fatalf("well-sampled node lost its measured duration: %+v", got)
 		}
 	})
@@ -684,7 +684,7 @@ func TestAutoscalerFloorDoesNotStealAnotherPoolsNodeGroups(t *testing.T) {
 	}
 }
 
-// A pool reports the longest fallow duration across its nodes, and the evidence
+// A pool reports the longest unused duration across its nodes, and the evidence
 // label has to describe the node that duration came from. Recording only that
 // *some* node in the pool was measured lets a well-observed node vouch for an
 // unobserved sibling's age — which republishes, at pool level, the exact
@@ -720,7 +720,7 @@ func TestOneNodesMeasurementDoesNotVouchForAnothersAge(t *testing.T) {
 	if claimsMeasured {
 		t.Fatalf("the reported duration (%s) is gpu-dark's age — it produced no samples at "+
 			"all — yet the evidence calls it measured. notes=%q",
-			f.Fallow, f.Evidence.Notes)
+			f.Unused, f.Evidence.Notes)
 	}
 	if f.Evidence.SampleCompleteness != 0 {
 		t.Fatalf("SampleCompleteness=%v; the duration came from a node with no series",
@@ -786,9 +786,9 @@ func TestMIGNodeCanStillReportAMeasurement(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("got %d findings, want 1", len(got))
 	}
-	if got[0].Fallow != 100*time.Hour {
-		t.Fatalf("fallow=%s, want the measured 100h; 28 advertised MIG slices are not 28 "+
-			"cards to observe", got[0].Fallow)
+	if got[0].Unused != 100*time.Hour {
+		t.Fatalf("unused=%s, want the measured 100h; 28 advertised MIG slices are not 28 "+
+			"cards to observe", got[0].Unused)
 	}
 }
 
@@ -828,9 +828,9 @@ func TestYoungIdlePodIsJudgedOnItsOwnLifetime(t *testing.T) {
 			"every minute of its life, was discarded because five days is a small fraction "+
 			"of a fortnight", len(got))
 	}
-	if got[0].Fallow > lived {
-		t.Fatalf("fallow=%s but the pod has only existed for %s; a pod cannot have been idle "+
-			"for longer than it has existed", got[0].Fallow, lived)
+	if got[0].Unused > lived {
+		t.Fatalf("unused=%s but the pod has only existed for %s; a pod cannot have been idle "+
+			"for longer than it has existed", got[0].Unused, lived)
 	}
 }
 

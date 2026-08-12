@@ -19,7 +19,7 @@ import (
 )
 
 // Version is the contract version carried in Result.APIVersion.
-const Version = "ullage.dev/v0.1"
+const Version = "ullage.dev/v0.2"
 
 // Check identifiers. Semantic and stable: they are the documentation anchor,
 // the suppression key, and the JSON discriminator.
@@ -229,10 +229,10 @@ func (w Workload) Ref() string {
 // Evidence is the audit trail. A recommendation that cannot be checked will not
 // be believed, so every number a finding asserts is reproducible from here.
 type Evidence struct {
-	// Window is the period examined; FallowDuration is how much of it the
-	// accelerator did no work for. FallowDuration is never greater than Window.
+	// Window is the period examined; UnusedDuration is how much of it the
+	// accelerator did no work for. UnusedDuration is never greater than Window.
 	Window         ISODuration `json:"window"`
-	FallowDuration ISODuration `json:"fallowDuration"`
+	UnusedDuration ISODuration `json:"unusedDuration"`
 
 	// LastNonZeroUtilization is absent when the accelerator did no work at any
 	// point in the window. Absent means "not within the window", not "never":
@@ -265,10 +265,10 @@ type Evidence struct {
 	Notes []string `json:"notes,omitempty"`
 }
 
-// Impact is measured, never judged. GPUHoursFallow is what the device did not
+// Impact is measured, never judged. GPUHoursUnused is what the device did not
 // do; whether that time was recoverable requires an intent no metric carries.
 type Impact struct {
-	GPUHoursFallow float64  `json:"gpuHoursFallow"`
+	GPUHoursUnused float64  `json:"gpuHoursUnused"`
 	WindowCost     *float64 `json:"windowCost,omitempty"`
 	Currency       string   `json:"currency,omitempty"`
 	PricingSource  string   `json:"pricingSource,omitempty"`
@@ -501,7 +501,7 @@ type ScanMeta struct {
 	// capacity it is a subset of and drive the ledger residual negative.
 	GPUHoursNotAnalysed float64 `json:"gpuHoursNotAnalysed"`
 
-	GPUHoursFallow   float64 `json:"gpuHoursFallow"`
+	GPUHoursUnused   float64 `json:"gpuHoursUnused"`
 	ProfilingMetrics bool    `json:"profilingMetricsAvailable"`
 
 	// EnginesChecked names the accelerator engine metrics consulted beyond the
@@ -577,10 +577,10 @@ func (r Result) MarshalJSON() ([]byte, error) {
 	return json.Marshal(alias(r))
 }
 
-// FallowPercent is the share of paid device-time that did no work.
-func (r *Result) FallowPercent() float64 {
+// UnusedPercent is the share of paid device-time that did no work.
+func (r *Result) UnusedPercent() float64 {
 	if r.Scan.GPUHoursPaid == 0 {
 		return 0
 	}
-	return r.Scan.GPUHoursFallow / r.Scan.GPUHoursPaid * 100
+	return r.Scan.GPUHoursUnused / r.Scan.GPUHoursPaid * 100
 }

@@ -85,7 +85,7 @@ func TestScanStaysSilentWhereItShould(t *testing.T) {
 func TestAutoscalerFloorIsByDesignNotWaste(t *testing.T) {
 	res := scan(t)
 	if len(res.ByDesign) == 0 {
-		t.Fatal("the reserved pool should appear as fallow by design")
+		t.Fatal("the reserved pool should appear as unused by design")
 	}
 	found := false
 	for _, f := range res.ByDesign {
@@ -258,11 +258,11 @@ func TestScanRecordsItsQueriesAndParameters(t *testing.T) {
 	}
 }
 
-func TestFindingsAreRankedByFallowHours(t *testing.T) {
+func TestFindingsAreRankedByUnusedHours(t *testing.T) {
 	res := scan(t)
 	for i := 1; i < len(res.Recommendations); i++ {
-		prev := res.Recommendations[i-1].Impact.GPUHoursFallow
-		cur := res.Recommendations[i].Impact.GPUHoursFallow
+		prev := res.Recommendations[i-1].Impact.GPUHoursUnused
+		cur := res.Recommendations[i].Impact.GPUHoursUnused
 		if cur > prev {
 			t.Fatalf("finding %d (%.0f h) outranks %d (%.0f h)", i, cur, i-1, prev)
 		}

@@ -6,7 +6,7 @@
   ullage reads fourteen days of utilization for each one and finds that eleven did
   no work at all — but four of those are held open deliberately by an autoscaler
   minimum, so they are shown and never counted as waste. Cluster-wide the result is
-  5.9 thousand of 23 thousand accelerator-hours fallow, or 26 percent, with the
+  5.9 thousand of 23 thousand accelerator-hours unused, or 26 percent, with the
   largest single finding an idle Jupyter StatefulSet costing about $3,427.</desc>
 
   <style>
@@ -23,7 +23,7 @@
     .cap3     { animation: cap3       18s infinite both; }
     .sweep    { animation: sweepFade  18s infinite both, sweepMove 18s infinite both; }
     .spark    { animation: sparkIn    18s infinite both; }
-    .fallow   { animation: fallowIn   18s infinite both; }
+    .unused   { animation: unusedIn   18s infinite both; }
     .reserved { animation: reservedIn 18s infinite both; }
     .panel    { animation: panelIn    18s infinite both; }
     .cmd      { animation: cmdIn      18s infinite both; }
@@ -35,7 +35,7 @@
     @keyframes sweepMove  { 0%,24%{transform:translateX(0)} 38%,100%{transform:translateX(1080px)} }
     @keyframes cap2       { 0%,25%{opacity:0} 29%{opacity:1} 42%{opacity:1} 46%{opacity:0} 100%{opacity:0} }
     @keyframes sparkIn    { 0%,33%{opacity:0} 38%{opacity:1} 97%{opacity:1} 100%{opacity:0} }
-    @keyframes fallowIn   { 0%,42%{opacity:0} 47%{opacity:1} 97%{opacity:1} 100%{opacity:0} }
+    @keyframes unusedIn   { 0%,42%{opacity:0} 47%{opacity:1} 97%{opacity:1} 100%{opacity:0} }
     @keyframes cap3       { 0%,46%{opacity:0} 50%{opacity:1} 97%{opacity:1} 100%{opacity:0} }
     @keyframes reservedIn { 0%,56%{opacity:0} 61%{opacity:1} 97%{opacity:1} 100%{opacity:0} }
     @keyframes panelIn    { 0%,22%{opacity:0} 26%{opacity:1} 97%{opacity:1} 100%{opacity:0} }
@@ -45,7 +45,7 @@
     /* Anyone who has told their system not to animate things gets the last
        frame rather than an empty box, because the last frame is the argument. */
     @media (prefers-reduced-motion: reduce) {
-      .node, .spark, .fallow, .reserved, .panel, .verdict, .cap3 { animation: none; opacity: 1; }
+      .node, .spark, .unused, .reserved, .panel, .verdict, .cap3 { animation: none; opacity: 1; }
       .cap1, .cap2, .sweep, .cmd { display: none; }
     }
   </style>
@@ -91,7 +91,7 @@
       <polyline transform="translate(148,202)" fill="none" stroke="#d29922" stroke-width="1.6" points="0,38 60,38"/>
       <text class="mono" x="149" y="258" font-size="10" fill="#d29922">idle 14d</text>
     </g>
-    <rect class="fallow" x="140" y="172" width="76" height="92" rx="6" fill="none" stroke="#d29922" stroke-width="1.6"/>
+    <rect class="unused" x="140" y="172" width="76" height="92" rx="6" fill="none" stroke="#d29922" stroke-width="1.6"/>
 
     <rect x="224" y="172" width="76" height="92" rx="6" fill="#0d1117" stroke="#30363d"/>
     <line x1="232" y1="240" x2="292" y2="240" stroke="#21262d"/>
@@ -100,7 +100,7 @@
       <polyline transform="translate(232,202)" fill="none" stroke="#d29922" stroke-width="1.6" points="0,38 60,38"/>
       <text class="mono" x="233" y="258" font-size="10" fill="#d29922">idle 14d</text>
     </g>
-    <rect class="fallow" x="224" y="172" width="76" height="92" rx="6" fill="none" stroke="#d29922" stroke-width="1.6"/>
+    <rect class="unused" x="224" y="172" width="76" height="92" rx="6" fill="none" stroke="#d29922" stroke-width="1.6"/>
 
     <rect x="308" y="172" width="76" height="92" rx="6" fill="#0d1117" stroke="#30363d"/>
     <line x1="316" y1="240" x2="376" y2="240" stroke="#21262d"/>
@@ -109,9 +109,9 @@
       <polyline transform="translate(316,202)" fill="none" stroke="#d29922" stroke-width="1.6" points="0,38 60,38"/>
       <text class="mono" x="317" y="258" font-size="10" fill="#d29922">idle 14d</text>
     </g>
-    <rect class="fallow" x="308" y="172" width="76" height="92" rx="6" fill="none" stroke="#d29922" stroke-width="1.6"/>
+    <rect class="unused" x="308" y="172" width="76" height="92" rx="6" fill="none" stroke="#d29922" stroke-width="1.6"/>
 
-    <text class="mono fallow" x="58" y="298" font-size="12" fill="#d29922">3 fallow · jupyter-alice · ~$3,427</text>
+    <text class="mono unused" x="58" y="298" font-size="12" fill="#d29922">3 unused · jupyter-alice · ~$3,427</text>
   </g>
 
   <!-- ============================== node-b ============================== -->
@@ -127,7 +127,7 @@
       <polyline transform="translate(444,202)" fill="none" stroke="#d29922" stroke-width="1.6" points="0,38 60,38"/>
       <text class="mono" x="445" y="258" font-size="10" fill="#d29922">idle 14d</text>
     </g>
-    <rect class="fallow" x="436" y="172" width="76" height="92" rx="6" fill="none" stroke="#d29922" stroke-width="1.6"/>
+    <rect class="unused" x="436" y="172" width="76" height="92" rx="6" fill="none" stroke="#d29922" stroke-width="1.6"/>
 
     <rect x="520" y="172" width="76" height="92" rx="6" fill="#0d1117" stroke="#30363d"/>
     <line x1="528" y1="240" x2="588" y2="240" stroke="#21262d"/>
@@ -136,7 +136,7 @@
       <polyline transform="translate(528,202)" fill="none" stroke="#d29922" stroke-width="1.6" points="0,38 60,38"/>
       <text class="mono" x="529" y="258" font-size="10" fill="#d29922">idle 14d</text>
     </g>
-    <rect class="fallow" x="520" y="172" width="76" height="92" rx="6" fill="none" stroke="#d29922" stroke-width="1.6"/>
+    <rect class="unused" x="520" y="172" width="76" height="92" rx="6" fill="none" stroke="#d29922" stroke-width="1.6"/>
 
     <rect x="604" y="172" width="76" height="92" rx="6" fill="#0d1117" stroke="#30363d"/>
     <line x1="612" y1="240" x2="672" y2="240" stroke="#21262d"/>
@@ -145,7 +145,7 @@
       <polyline transform="translate(612,202)" fill="none" stroke="#d29922" stroke-width="1.6" points="0,38 60,38"/>
       <text class="mono" x="613" y="258" font-size="10" fill="#d29922">idle 14d</text>
     </g>
-    <rect class="fallow" x="604" y="172" width="76" height="92" rx="6" fill="none" stroke="#d29922" stroke-width="1.6"/>
+    <rect class="unused" x="604" y="172" width="76" height="92" rx="6" fill="none" stroke="#d29922" stroke-width="1.6"/>
 
     <rect x="688" y="172" width="76" height="92" rx="6" fill="#0d1117" stroke="#30363d"/>
     <line x1="696" y1="240" x2="756" y2="240" stroke="#21262d"/>
@@ -154,9 +154,9 @@
       <polyline transform="translate(696,202)" fill="none" stroke="#d29922" stroke-width="1.6" points="0,38 60,38"/>
       <text class="mono" x="697" y="258" font-size="10" fill="#d29922">idle 14d</text>
     </g>
-    <rect class="fallow" x="688" y="172" width="76" height="92" rx="6" fill="none" stroke="#d29922" stroke-width="1.6"/>
+    <rect class="unused" x="688" y="172" width="76" height="92" rx="6" fill="none" stroke="#d29922" stroke-width="1.6"/>
 
-    <text class="mono fallow" x="438" y="298" font-size="12" fill="#d29922">whole node idle · 2 pods block scale-down</text>
+    <text class="mono unused" x="438" y="298" font-size="12" fill="#d29922">whole node idle · 2 pods block scale-down</text>
   </g>
 
   <!-- ============================== node-c ============================== -->
@@ -215,13 +215,13 @@
   </g>
 
   <g class="verdict">
-    <text class="sans" x="66" y="394" font-size="17" font-weight="600" fill="#e6edf3">5.9k of 22k accelerator-hours fallow (27%) · 60 of 68 accelerators analysed</text>
+    <text class="sans" x="66" y="394" font-size="17" font-weight="600" fill="#e6edf3">5.9k of 22k accelerator-hours unused (27%) · 60 of 68 accelerators analysed</text>
 
-    <text class="mono" x="66" y="424" font-size="12.5" fill="#8b949e">1. research/jupyter-alice · 3 accelerators · 1.0k fallow · ~$3,427 · alice@example.com</text>
+    <text class="mono" x="66" y="424" font-size="12.5" fill="#8b949e">1. research/jupyter-alice · 3 accelerators · 1.0k unused · ~$3,427 · alice@example.com</text>
     <text class="mono" x="66" y="452" font-size="13" fill="#79c0ff">$ kubectl scale statefulset -n research jupyter-alice --replicas=0</text>
     <text class="mono" x="66" y="478" font-size="11.5" fill="#6e7681">the StatefulSet, not the pods — deleting those frees nothing, the controller recreates them</text>
 
-    <text class="mono" x="1134" y="394" font-size="12" fill="#58a6ff" text-anchor="end">16 more fallow by design</text>
+    <text class="mono" x="1134" y="394" font-size="12" fill="#58a6ff" text-anchor="end">16 more unused by design</text>
     <text class="mono" x="1134" y="414" font-size="11" fill="#6e7681" text-anchor="end">shown, never counted as waste</text>
   </g>
 

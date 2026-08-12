@@ -56,7 +56,7 @@ func TestAnOldNodeIsBilledOnlyForTheWindow(t *testing.T) {
 
 // Clock skew puts node creation timestamps in the future often enough to
 // matter. A negative duration would subtract capacity from the denominator
-// and could drive the reported fallow share above 100%.
+// and could drive the reported unused share above 100%.
 func TestANodeCreatedInTheFutureContributesNothingRatherThanNegativeTime(t *testing.T) {
 	const window = 14 * 24 * time.Hour
 	now := time.Date(2026, 8, 11, 7, 0, 0, 0, time.UTC)

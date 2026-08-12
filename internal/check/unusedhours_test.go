@@ -17,12 +17,12 @@ import (
 // the group's longest idle run against every device in it gives 10 x 14 = 140
 // -- nearly three times the real figure.
 //
-// It is not a rounding error. Findings are ranked by fallow hours and priced
+// It is not a rounding error. Findings are ranked by unused hours and priced
 // from them, so the inflated group outranks genuinely worse waste, and the
 // cluster total that the tool exists to state is wrong in the direction that
 // makes the tool look good. The first person to check the number by hand stops
 // believing the rest of it.
-func TestGroupedFallowHoursAreSummedNotMultiplied(t *testing.T) {
+func TestGroupedUnusedHoursAreSummedNotMultiplied(t *testing.T) {
 	var devices []inventory.Device
 	var pods []inventory.PodView
 
@@ -52,18 +52,18 @@ func TestGroupedFallowHoursAreSummedNotMultiplied(t *testing.T) {
 	f := found[0]
 
 	const want = 14*24 + 9*4*24 // device-hours
-	if f.FallowHours != want {
-		t.Fatalf("FallowHours = %.0f, want %d.\n"+
+	if f.UnusedHours != want {
+		t.Fatalf("UnusedHours = %.0f, want %d.\n"+
 			"One accelerator idle a fortnight beside nine idle four days is %d device-hours. "+
 			"%.0f is the group's longest idle run billed against all ten devices, which "+
 			"invents waste that never happened and ranks this group above real findings.",
-			f.FallowHours, want, want, f.FallowHours)
+			f.UnusedHours, want, want, f.UnusedHours)
 	}
 
 	// The headline stays the longest, because "this has been going on for two
 	// weeks" is the true and useful thing to say about the group.
-	if f.Fallow != 14*24*time.Hour {
-		t.Fatalf("Fallow = %s, want the group's longest run of 336h", f.Fallow)
+	if f.Unused != 14*24*time.Hour {
+		t.Fatalf("Unused = %s, want the group's longest run of 336h", f.Unused)
 	}
 }
 
@@ -90,8 +90,8 @@ func TestUniformlyIdleGroupIsUnchanged(t *testing.T) {
 	if len(found) != 1 {
 		t.Fatalf("got %d findings, want 1", len(found))
 	}
-	if got, want := found[0].FallowHours, float64(4*7*24); got != want {
-		t.Fatalf("FallowHours = %.0f, want %.0f: four devices idle a week each is %.0f "+
+	if got, want := found[0].UnusedHours, float64(4*7*24); got != want {
+		t.Fatalf("UnusedHours = %.0f, want %.0f: four devices idle a week each is %.0f "+
 			"device-hours, and the fix must not shrink a total that was already right",
 			got, want, want)
 	}
@@ -103,7 +103,7 @@ func TestUniformlyIdleGroupIsUnchanged(t *testing.T) {
 // A pool of two nodes: one 8-GPU node empty a fortnight, one 8-GPU node empty
 // four days. Real waste is 8*336 + 8*96 = 3456 device-hours. Billing the
 // pool's longest against every device gives 16*336 = 5376.
-func TestPoolFallowHoursFollowEachNodesOwnEmptyTime(t *testing.T) {
+func TestPoolUnusedHoursFollowEachNodesOwnEmptyTime(t *testing.T) {
 	var devices []inventory.Device
 	mk := func(node string, idle time.Duration) inventory.NodeView {
 		for i := 0; i < 8; i++ {
@@ -126,11 +126,11 @@ func TestPoolFallowHoursFollowEachNodesOwnEmptyTime(t *testing.T) {
 	}
 
 	const want = 8*14*24 + 8*4*24
-	if found[0].FallowHours != want {
-		t.Fatalf("FallowHours = %.0f, want %d.\n"+
+	if found[0].UnusedHours != want {
+		t.Fatalf("UnusedHours = %.0f, want %d.\n"+
 			"A node empty for a fortnight beside one empty four days is %d device-hours "+
 			"of waste. Charging the whole pool the longest node's duration is how the "+
 			"headline cluster total ends up nearly double what actually happened.",
-			found[0].FallowHours, want, want)
+			found[0].UnusedHours, want, want)
 	}
 }

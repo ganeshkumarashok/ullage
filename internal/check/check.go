@@ -95,19 +95,19 @@ type RawFinding struct {
 	Subject Subject
 
 	// Devices are the device IDs the finding covers, which is how the pipeline
-	// computes fallow hours without the check doing arithmetic.
+	// computes unused hours without the check doing arithmetic.
 	Devices []string
 
-	// Fallow is how long the devices have been doing nothing. When they have
-	// not all been fallow for the same length of time it is the longest, which
+	// Unused is how long the devices have been doing nothing. When they have
+	// not all been unused for the same length of time it is the longest, which
 	// is the right headline — "this has been going on for two weeks" — but the
 	// wrong thing to bill for.
-	Fallow time.Duration
+	Unused time.Duration
 
-	// FallowHours is the actual accelerator-hours wasted: every device's own
-	// fallow duration, added up.
+	// UnusedHours is the actual accelerator-hours wasted: every device's own
+	// unused duration, added up.
 	//
-	// It is a separate number because Fallow is a maximum and multiplying a
+	// It is a separate number because Unused is a maximum and multiplying a
 	// maximum by a device count invents waste that never happened. One
 	// accelerator idle a fortnight beside nine idle a day is 23 device-days,
 	// not 140. Findings are ranked by this figure and priced from it, so the
@@ -117,7 +117,7 @@ type RawFinding struct {
 	// Zero means the check did not distinguish, and the pipeline falls back to
 	// the product — correct when a single pod holds every device, which is the
 	// only case where it now happens.
-	FallowHours float64
+	UnusedHours float64
 
 	Confidence string
 	Evidence   api.Evidence

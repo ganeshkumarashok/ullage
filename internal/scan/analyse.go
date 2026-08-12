@@ -200,7 +200,7 @@ func Analyse(ctx context.Context, cl *inventory.Cluster, inv *inventory.Inventor
 	total := 0.0
 	for i := range ranked {
 		ranked[i].Rank = i + 1
-		total += ranked[i].Impact.GPUHoursFallow
+		total += ranked[i].Impact.GPUHoursUnused
 	}
 	for i := range byDesign {
 		byDesign[i].Rank = i + 1
@@ -223,7 +223,7 @@ func Analyse(ctx context.Context, cl *inventory.Cluster, inv *inventory.Inventor
 		res.Suppressed = suppressed
 	}
 	res.BelowThreshold = below
-	res.Scan.GPUHoursFallow = total
+	res.Scan.GPUHoursUnused = total
 	res.UnmetDemand = unmetDemand(cl)
 	return res, nil
 }
@@ -294,14 +294,14 @@ func enrich(cl *inventory.Cluster, rf check.RawFinding, opts Options) api.Findin
 		}
 	}
 
-	// Fallow hours are device-hours, so a finding covering four devices for a
+	// Unused hours are device-hours, so a finding covering four devices for a
 	// day is four times one covering one. This is the only ranking signal, and
 	// it is the one a reader can verify by hand.
 	// Every device's own idle time, added up. Falling back to the product is
-	// only correct when the devices really were all fallow together.
-	f.Impact.GPUHoursFallow = rf.FallowHours
-	if f.Impact.GPUHoursFallow == 0 {
-		f.Impact.GPUHoursFallow = float64(f.TotalAccelerators()) * rf.Fallow.Hours()
+	// only correct when the devices really were all unused together.
+	f.Impact.GPUHoursUnused = rf.UnusedHours
+	if f.Impact.GPUHoursUnused == 0 {
+		f.Impact.GPUHoursUnused = float64(f.TotalAccelerators()) * rf.Unused.Hours()
 	}
 	priceFinding(&f, opts.Pricing)
 	return f
@@ -321,7 +321,7 @@ func priceFinding(f *api.Finding, p *api.Pricing) {
 	if !ok {
 		return
 	}
-	cost := f.Impact.GPUHoursFallow * rate
+	cost := f.Impact.GPUHoursUnused * rate
 	f.Impact.WindowCost = &cost
 	f.Impact.Currency = p.Currency
 	f.Impact.PricingSource = p.Source
@@ -488,11 +488,11 @@ func sortFindings(f []api.Finding) {
 		if ci != nil && *ci != *cj {
 			return *ci > *cj
 		}
-		if f[i].Impact.GPUHoursFallow != f[j].Impact.GPUHoursFallow {
-			return f[i].Impact.GPUHoursFallow > f[j].Impact.GPUHoursFallow
+		if f[i].Impact.GPUHoursUnused != f[j].Impact.GPUHoursUnused {
+			return f[i].Impact.GPUHoursUnused > f[j].Impact.GPUHoursUnused
 		}
-		if f[i].Evidence.FallowDuration != f[j].Evidence.FallowDuration {
-			return f[i].Evidence.FallowDuration > f[j].Evidence.FallowDuration
+		if f[i].Evidence.UnusedDuration != f[j].Evidence.UnusedDuration {
+			return f[i].Evidence.UnusedDuration > f[j].Evidence.UnusedDuration
 		}
 		return f[i].ID < f[j].ID
 	})

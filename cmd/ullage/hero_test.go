@@ -55,7 +55,7 @@ func TestHeroImageAgreesWithTheTranscripts(t *testing.T) {
 	// transcripts are the checked copy of what the tool prints, so agreeing
 	// with them is agreeing with the tool.
 	for _, figure := range []string{
-		"5.9k of 22k accelerator-hours fallow (27%)",
+		"5.9k of 22k accelerator-hours unused (27%)",
 		"60 of 68 accelerators analysed",
 		"research/jupyter-alice",
 		"~$3,427",

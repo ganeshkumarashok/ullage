@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -115,9 +116,9 @@ func TestReadmeTranscriptMatchesTheBinary(t *testing.T) {
 	// Anchor on the claims most likely to rot: the headline ratio and the
 	// census. Both are computed, so a change in the demo fixture moves them.
 	for _, want := range []string{
-		"accelerator-hours fallow",
+		"accelerator-hours unused",
 		"accelerators analysed",
-		"Fallow by design",
+		"Reserved on purpose",
 		"Not analysed",
 		"Unmet demand",
 	} {
@@ -274,4 +275,46 @@ func TestEveryRegisteredFlagIsDocumentedInTheHelpText(t *testing.T) {
 				fl.Name)
 		}
 	})
+}
+
+// Relative links between markdown files are unchecked by the anchor test above,
+// and they break silently whenever a doc moves. Splitting the reference material
+// out of the README created a dozen of them in one commit.
+var relativeLink = regexp.MustCompile(`\]\((?:\./)?([^)#:][^)]*?)(?:#[^)]*)?\)`)
+
+func TestRelativeLinksResolve(t *testing.T) {
+	root := "../.."
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			switch info.Name() {
+			case ".git", "bin", "node_modules":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(path) != ".md" {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, m := range relativeLink.FindAllStringSubmatch(string(raw), -1) {
+			target := strings.TrimSpace(m[1])
+			if target == "" || strings.Contains(target, "://") || strings.HasPrefix(target, "mailto:") {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(filepath.Dir(path), target)); err != nil {
+				rel, _ := filepath.Rel(root, path)
+				t.Errorf("%s links to %q, which does not exist", rel, target)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking the repo: %v", err)
+	}
 }

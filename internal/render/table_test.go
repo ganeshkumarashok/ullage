@@ -21,7 +21,7 @@ func baseResult() *api.Result {
 			Context:              "prod-cluster",
 			Window:               api.ISODuration(14 * 24 * time.Hour),
 			GPUHoursPaid:         1000,
-			GPUHoursFallow:       0,
+			GPUHoursUnused:       0,
 			AcceleratorsAnalyzed: 40,
 			AcceleratorsObserved: 40,
 		},
@@ -46,10 +46,10 @@ func idleFinding(ns, name string, gpus int, owner string) api.Finding {
 		},
 		Evidence: api.Evidence{
 			Window:         api.ISODuration(14 * 24 * time.Hour),
-			FallowDuration: api.ISODuration(96 * time.Hour),
+			UnusedDuration: api.ISODuration(96 * time.Hour),
 		},
 		Impact: api.Impact{
-			GPUHoursFallow: float64(gpus) * 96,
+			GPUHoursUnused: float64(gpus) * 96,
 			WindowCost:     &cost,
 			Currency:       "USD",
 			PricingSource:  "test rates",
@@ -84,7 +84,7 @@ func TestTableWithFindingsShowsWorkloadGPUCountAndOwner(t *testing.T) {
 	res := baseResult()
 	f := idleFinding("ml", "notebook-42", 2, "alice@example.com")
 	res.Recommendations = []api.Finding{f}
-	res.Scan.GPUHoursFallow = f.Impact.GPUHoursFallow
+	res.Scan.GPUHoursUnused = f.Impact.GPUHoursUnused
 
 	var buf bytes.Buffer
 	if err := Table(&buf, res, Options{Version: "v-test"}); err != nil {
@@ -225,7 +225,7 @@ func TestTableShowsByDesignFindingsAlongsideRecommendations(t *testing.T) {
 		Accelerators: []api.Accelerator{
 			{Model: "NVIDIA-A100-SXM4-80GB", Count: 4},
 		},
-		Impact: api.Impact{GPUHoursFallow: 200},
+		Impact: api.Impact{GPUHoursUnused: 200},
 	}}
 
 	var buf bytes.Buffer
@@ -233,7 +233,7 @@ func TestTableShowsByDesignFindingsAlongsideRecommendations(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "Fallow by design") {
+	if !strings.Contains(out, "Reserved on purpose") {
 		t.Fatalf("output does not show the by-design section:\n%s", out)
 	}
 	if !strings.Contains(out, "reserved capacity for the on-call GPU pool") {
@@ -254,7 +254,7 @@ func TestTableShowsByDesignFindingsEvenWithZeroRecommendations(t *testing.T) {
 		Because:      "kept warm for incident response, not counted as waste",
 		ByDesign:     true,
 		Accelerators: []api.Accelerator{{Model: "NVIDIA-A100-SXM4-80GB", Count: 4}},
-		Impact:       api.Impact{GPUHoursFallow: 200},
+		Impact:       api.Impact{GPUHoursUnused: 200},
 	}}
 
 	var buf bytes.Buffer
@@ -265,7 +265,7 @@ func TestTableShowsByDesignFindingsEvenWithZeroRecommendations(t *testing.T) {
 	if !strings.Contains(out, "No recommendations") {
 		t.Fatalf("expected the no-recommendations headline:\n%s", out)
 	}
-	if !strings.Contains(out, "Fallow by design") {
+	if !strings.Contains(out, "Reserved on purpose") {
 		t.Fatalf("a by-design finding with zero recommendations was not shown at all; "+
 			"the decision it records became invisible instead of staying visible:\n%s", out)
 	}
@@ -277,7 +277,7 @@ func TestTableShowsSuppressedTotalWithItsSize(t *testing.T) {
 	cost := 10.0
 	res.Suppressed = []api.Finding{{
 		Summary: "suppressed job",
-		Impact:  api.Impact{GPUHoursFallow: 50, WindowCost: &cost, Currency: "USD"},
+		Impact:  api.Impact{GPUHoursUnused: 50, WindowCost: &cost, Currency: "USD"},
 	}}
 
 	var buf bytes.Buffer
@@ -620,7 +620,7 @@ func TestTableWrapsHeadersAndCommandsInANSIWhenColorIsRequested(t *testing.T) {
 	res := baseResult()
 	f := idleFinding("ml", "notebook-42", 1, "alice@example.com")
 	res.Recommendations = []api.Finding{f}
-	res.Scan.GPUHoursFallow = f.Impact.GPUHoursFallow
+	res.Scan.GPUHoursUnused = f.Impact.GPUHoursUnused
 
 	var plain, colored bytes.Buffer
 	if err := Table(&plain, res, Options{Version: "v-test", Color: false}); err != nil {

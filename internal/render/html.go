@@ -84,7 +84,7 @@ type report struct {
 	HeadlineSub string
 	Cost        string
 	HasCost     bool
-	FallowPct   string
+	UnusedPct   string
 
 	Observed  int
 	Analyzed  int
@@ -184,7 +184,7 @@ type findingView struct {
 	ConfClass    string
 	Ownership    string
 	Window       string
-	Fallow       string
+	Unused       string
 	LastSeen     string
 	UtilMax      string
 	Power        string
@@ -251,8 +251,8 @@ func buildReport(res *api.Result, o HTMLOptions) report {
 		r.UnmetDemand = res.UnmetDemand
 	}
 
-	r.Headline = hours(res.Scan.GPUHoursFallow)
-	r.FallowPct = fmt.Sprintf("%.0f", res.FallowPercent())
+	r.Headline = hours(res.Scan.GPUHoursUnused)
+	r.UnusedPct = fmt.Sprintf("%.0f", res.UnusedPercent())
 	r.HeadlineSub = fmt.Sprintf("of %s accelerator-hours paid for in the last %s",
 		hours(res.Scan.GPUHoursPaid), Human(res.Scan.Window.Duration()))
 
@@ -303,7 +303,7 @@ func ownerBars(res *api.Result, o HTMLOptions) ([]ownerBar, int, string) {
 			a = &agg{}
 			byOwner[key] = a
 		}
-		a.hours += f.Impact.GPUHoursFallow
+		a.hours += f.Impact.GPUHoursUnused
 		a.count++
 		if f.Impact.WindowCost != nil {
 			a.cost += *f.Impact.WindowCost
@@ -367,7 +367,7 @@ func ownerBars(res *api.Result, o HTMLOptions) ([]ownerBar, int, string) {
 		}
 		out = append(out, b)
 	}
-	rankedBy := "fallow accelerator-hours"
+	rankedBy := "unused accelerator-hours"
 	if byCost {
 		rankedBy = "cost"
 	}
@@ -412,13 +412,13 @@ func newFindingView(f api.Finding, res *api.Result, o HTMLOptions, l Ledger, anc
 		Kind:         f.Workload.Kind,
 		Summary:      f.Summary,
 		Because:      f.Because,
-		Hours:        hours(f.Impact.GPUHoursFallow),
+		Hours:        hours(f.Impact.GPUHoursUnused),
 		Accelerators: AcceleratorSummary(f),
 		Confidence:   f.EvidenceConfidence,
 		ConfClass:    confClass(f.EvidenceConfidence),
 		Ownership:    f.OwnershipConfidence,
 		Window:       Human(f.Evidence.Window.Duration()),
-		Fallow:       Human(f.Evidence.FallowDuration.Duration()),
+		Unused:       Human(f.Evidence.UnusedDuration.Duration()),
 		UtilMax:      fmt.Sprintf("%.0f%%", f.Evidence.UtilizationMax),
 		Notes:        f.Evidence.Notes,
 		Risk:         f.Risk,
@@ -476,8 +476,8 @@ func newFindingView(f api.Finding, res *api.Result, o HTMLOptions, l Ledger, anc
 		v.HasCost = true
 	}
 
-	if l.Fallow > 0 {
-		v.Share = f.Impact.GPUHoursFallow / l.Fallow
+	if l.Unused > 0 {
+		v.Share = f.Impact.GPUHoursUnused / l.Unused
 	}
 
 	return v
@@ -511,14 +511,14 @@ func htmlFuncs() template.FuncMap {
 // here carries meaning on its own.
 func rowClass(key string) string {
 	switch key {
-	case "fallow":
-		return "bar-fallow"
+	case "unused":
+		return "bar-unused"
 	case "by-design":
 		return "hatch-design"
 	case "not-analysed":
 		return "bar-neutral"
 	case "suppressed":
-		// Suppressed hours are fallow hours somebody silenced, not leftovers.
+		// Suppressed hours are unused hours somebody silenced, not leftovers.
 		// Sharing the residual colour would file them under "probably fine",
 		// which is the opposite of what a suppression means.
 		return "bar-suppressed"
@@ -529,8 +529,8 @@ func rowClass(key string) string {
 
 func swatchClass(key string) string {
 	switch key {
-	case "fallow":
-		return "sw-fallow"
+	case "unused":
+		return "sw-unused"
 	case "by-design":
 		return "sw-design"
 	case "not-analysed":

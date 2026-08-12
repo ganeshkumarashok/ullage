@@ -163,7 +163,7 @@ func fullyPopulatedResult() Result {
 				DevicePluginExclusive: 8, TimeSliced: 1, MIG: 1, DRA: 0,
 			},
 			GPUHoursPaid:     4032,
-			GPUHoursFallow:   1008,
+			GPUHoursUnused:   1008,
 			ProfilingMetrics: true,
 		},
 		Recommendations: []Finding{{
@@ -183,7 +183,7 @@ func fullyPopulatedResult() Result {
 			}},
 			Evidence: Evidence{
 				Window:                 ISODuration(14 * 24 * time.Hour),
-				FallowDuration:         ISODuration(13*24*time.Hour + 21*time.Hour),
+				UnusedDuration:         ISODuration(13*24*time.Hour + 21*time.Hour),
 				LastNonZeroUtilization: &last,
 				UtilizationMax:         0,
 				PowerDrawWatts:         56,
@@ -192,7 +192,7 @@ func fullyPopulatedResult() Result {
 				Notes:                  []string{"profiling metrics unavailable"},
 			},
 			Impact: Impact{
-				GPUHoursFallow: 1008, WindowCost: &cost, Currency: "USD",
+				GPUHoursUnused: 1008, WindowCost: &cost, Currency: "USD",
 				PricingSource: "built-in list prices", PricingScope: "list",
 			},
 			Owner: Owner{Identity: "alice@example.com", ResolvedVia: "namespace annotation"},

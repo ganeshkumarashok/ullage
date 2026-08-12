@@ -28,7 +28,7 @@ is not stuck, it is slow. The clock starts from the last state transition, so a
 pod that is crash-looping is measured from the beginning of the loop rather
 than from the last individual restart.
 
-The reported fallow duration is capped at the analysis window, so a pod that
+The reported unused duration is capped at the analysis window, so a pod that
 has been broken for a month does not claim a month of waste inside a 14-day
 window.
 
@@ -82,4 +82,4 @@ See [Suppressing](../../README.md#suppressing) for the id-matching rules.
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--stuck-threshold` | `1h` | Minimum time in a non-running state before reporting |
-| `--window` | `14d` | Caps the reported fallow duration |
+| `--window` | `14d` | Caps the reported unused duration |

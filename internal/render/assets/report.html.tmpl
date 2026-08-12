@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="generator" content="ullage {{.Version}}">
 <meta name="robots" content="noindex">
-<title>ullage — fallow accelerator capacity{{if .Context}} — {{.Context}}{{end}}</title>
+<title>ullage — unused accelerator capacity{{if .Context}} — {{.Context}}{{end}}</title>
 <style>{{.CSS}}</style>
 </head>
 <body>
@@ -31,9 +31,9 @@
 <!-- Headline -->
 {{if .Findings}}
 <div class="headline">
-  <div class="big">{{.Headline}} accelerator-hours fallow</div>
+  <div class="big">{{.Headline}} accelerator-hours unused</div>
   <div class="qualifier">
-    {{.HeadlineSub}} — {{.FallowPct}}% of the bill.
+    {{.HeadlineSub}} — {{.UnusedPct}}% of the bill.
     {{if .HasCost}}Worth <strong>{{.Cost}}</strong> at the rates below.{{end}}
   </div>
 </div>
@@ -137,7 +137,7 @@
 
     <p class="footnote">
       &ldquo;Unflagged&rdquo; is a remainder, not a
-      measurement: ullage counts fallow hours, not productive ones, so an hour
+      measurement: ullage counts unused hours, not productive ones, so an hour
       in that row may be real work or may be idleness too short to report.
     </p>
   </div>
@@ -166,7 +166,7 @@
         not idle.
       </li>
       <li>
-        <strong>Measure how long it has been quiet.</strong> Fallow time is the
+        <strong>Measure how long it has been quiet.</strong> Unused time is the
         unbroken run of zeros up to now, not an average. Capacity is charged per
         node for <code>min(node age, window) × accelerators</code>, so a node
         created this morning is not billed for the whole window.
@@ -274,10 +274,10 @@
 </section>
 {{end}}
 
-<!-- Reserved by policy -->
+<!-- Reserved on purpose -->
 {{if .ByDesign}}
 <section id="by-design">
-  <h2>Empty on purpose</h2>
+  <h2>Reserved on purpose</h2>
   <div class="panel">
     <p class="lede">
       Capacity held idle deliberately — an autoscaler floor, a reservation, a
@@ -305,7 +305,7 @@
         {{if .Because}}<p class="claim">{{.Because}}</p>{{end}}
         <dl class="kv">
           <dt>Accelerators</dt><dd>{{.Accelerators}}</dd>
-          <dt>Idle for</dt><dd>{{.Fallow}} of {{.Window}}</dd>
+          <dt>Idle for</dt><dd>{{.Unused}} of {{.Window}}</dd>
           {{if .Owner}}<dt>Owner</dt><dd>{{.Owner}}{{if .OwnerVia}} <span class="rownote">via {{.OwnerVia}}</span>{{end}}</dd>{{end}}
         </dl>
       </div>
@@ -321,7 +321,7 @@
   <h2>Who is holding it</h2>
   <div class="panel">
     <p class="lede">
-      Fallow accelerator-hours grouped by the owner ullage resolved, ranked by
+      Unused accelerator-hours grouped by the owner ullage resolved, ranked by
       {{.OwnerMeasure}}. This ranks opportunities, not people: the largest bar
       is usually the easiest conversation, not the worst offender.
     </p>
@@ -382,7 +382,7 @@
     <div class="body">
       <dl class="kv">
         <dt>Accelerators</dt><dd>{{.Accelerators}}</dd>
-        <dt>Idle for</dt><dd>{{.Fallow}} of a {{.Window}} window</dd>
+        <dt>Idle for</dt><dd>{{.Unused}} of a {{.Window}} window</dd>
         <dt>Last did work</dt><dd>{{.LastSeen}}</dd>
         <dt>Peak utilization</dt><dd>{{.UtilMax}} — the highest sample, not the mean</dd>
         {{if .Power}}<dt>Power draw</dt><dd>{{.Power}}</dd>{{end}}

@@ -115,7 +115,7 @@ type Stats struct {
 	BusyEngine string
 
 	LastNonZero *time.Time
-	FallowSince time.Time
+	UnusedSince time.Time
 
 	// Answered is the fraction of the window for which the "was this device
 	// ever non-zero" question actually got an answer. Prometheus is queried in
@@ -194,14 +194,14 @@ func (s Stats) answered() float64 {
 	return s.Answered
 }
 
-// FallowFor returns how long the device has read exactly zero up to now, and
+// UnusedFor returns how long the device has read exactly zero up to now, and
 // whether it has read zero at all.
 //
 // The distinction that matters is between "no samples" and "zero samples". A
 // series that returned nothing is unknown, and unknown must never be reported
 // as idle: an exporter that crashed a week ago would otherwise produce a
 // cluster-wide recommendation to delete everything.
-func (s Stats) FallowFor(now time.Time) (time.Duration, bool) {
+func (s Stats) UnusedFor(now time.Time) (time.Duration, bool) {
 	if s.Samples == 0 {
 		return 0, false
 	}
@@ -222,10 +222,10 @@ func (s Stats) FallowFor(now time.Time) (time.Duration, bool) {
 	if s.LastNonZero != nil && !s.LastNonZero.Before(now) {
 		return 0, false
 	}
-	if s.FallowSince.IsZero() {
+	if s.UnusedSince.IsZero() {
 		return 0, false
 	}
-	d := now.Sub(s.FallowSince)
+	d := now.Sub(s.UnusedSince)
 	if d <= 0 {
 		return 0, false
 	}

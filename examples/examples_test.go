@@ -52,13 +52,13 @@ const scanHeader = `"scan": {
     "acceleratorsObserved": 8,
     "acceleratorsAnalyzed": 8,
     "gpuHoursPaid": 2688,
-    "gpuHoursFallow": 0
+    "gpuHoursUnused": 0
   }`
 
 // emptyReport is a well-formed scan that found nothing, so a gate script runs
 // all the way to its exit decision rather than bailing early.
 const emptyReport = `{
-  "apiVersion": "ullage.dev/v0.1",
+  "apiVersion": "ullage.dev/v0.2",
   ` + scanHeader + `,
   "recommendations": [],
   "byDesign": [],
@@ -153,12 +153,12 @@ func TestExamplesRunTheDemoWhenNoPrometheusIsSet(t *testing.T) {
 // book has never heard of it -- was the one guaranteed to pass a dollar budget.
 func TestTheBudgetGateWillNotWaveThroughAFindingItCannotPrice(t *testing.T) {
 	const unpriced = `{
-  "apiVersion": "ullage.dev/v0.1",
+  "apiVersion": "ullage.dev/v0.2",
   ` + scanHeader + `,
   "recommendations": [
     {"id": "idle-pod/research/big",
      "summary": "3 pods, no GPU work since the window began",
-     "impact": {"gpuHoursFallow": 3000},
+     "impact": {"gpuHoursUnused": 3000},
      "owner": {"identity": "alice@example.com"},
      "fix": {"command": "kubectl scale statefulset -n research big --replicas=0"}}
   ],
@@ -190,7 +190,7 @@ func TestTheBudgetGateWillNotWaveThroughAFindingItCannotPrice(t *testing.T) {
 // does not come out short -- it does not come out at all.
 func TestWeeklyDigestSurvivesAClusterWithNoAnalysableCapacity(t *testing.T) {
 	const nothingAnalysable = `{
-  "apiVersion": "ullage.dev/v0.1",
+  "apiVersion": "ullage.dev/v0.2",
   "scan": {
     "tool": {"name": "ullage", "version": "v0.0.0-test"},
     "context": "test-cluster",
@@ -199,7 +199,7 @@ func TestWeeklyDigestSurvivesAClusterWithNoAnalysableCapacity(t *testing.T) {
     "acceleratorsObserved": 8,
     "acceleratorsAnalyzed": 0,
     "gpuHoursPaid": 0,
-    "gpuHoursFallow": 0
+    "gpuHoursUnused": 0
   },
   "recommendations": [],
   "byDesign": [], "suppressed": [], "notAnalyzed": [], "warnings": [],

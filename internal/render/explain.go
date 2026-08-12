@@ -27,19 +27,19 @@ func Explain(w io.Writer, f *api.Finding, res *api.Result, o Options) error {
 	p.section("Evidence")
 	p.field("Window", "%s ending %s",
 		Human(f.Evidence.Window.Duration()), res.Scan.Started.Format("2 Jan 2006 15:04 MST"))
-	p.field("Fallow for", "%s", Human(f.Evidence.FallowDuration.Duration()))
+	p.field("Unused for", "%s", Human(f.Evidence.UnusedDuration.Duration()))
 	if f.Evidence.LastNonZeroUtilization != nil {
 		p.field("Last GPU work", "%s", f.Evidence.LastNonZeroUtilization.Format("2 Jan 2006 15:04 MST"))
 	} else {
 		p.field("Last GPU work", "none within the window")
 	}
 	// The peak is over the whole window; the zero claim is over the trailing
-	// fallow run. Printing "peak 100%" three lines above "read exactly zero"
+	// unused run. Printing "peak 100%" three lines above "read exactly zero"
 	// with no qualifier reads as a contradiction, and a reader who catches a
 	// tool contradicting itself stops believing the rest of the screen — which
 	// is the entire cost of getting this wording wrong.
 	if f.Evidence.UtilizationMax > 0 && f.Evidence.LastNonZeroUtilization != nil {
-		p.field("Peak utilization", "%.0f%% — reached before the fallow period began, not during it",
+		p.field("Peak utilization", "%.0f%% — reached earlier in the window, before the device went quiet",
 			f.Evidence.UtilizationMax)
 	} else {
 		p.field("Peak utilization", "%.0f%% across the whole window", f.Evidence.UtilizationMax)
@@ -78,7 +78,7 @@ func Explain(w io.Writer, f *api.Finding, res *api.Result, o Options) error {
 	for _, a := range f.Accelerators {
 		p.field("Held", "%d × %s (%s)", a.Count, a.Model, a.Allocation)
 	}
-	p.field("Fallow", "%s accelerator-hours", hours(f.Impact.GPUHoursFallow))
+	p.field("Unused", "%s accelerator-hours", hours(f.Impact.GPUHoursUnused))
 	if f.Impact.WindowCost != nil && len(f.Accelerators) > 0 {
 		p.field("Cost", "~%s%s over the window",
 			currencySymbol(f.Impact.Currency), money(*f.Impact.WindowCost))
@@ -183,7 +183,7 @@ func meaning(f *api.Finding) string {
 	switch f.Check {
 	case api.CheckIdlePod:
 		// "the whole period above" would name the window, and the window is not
-		// what was zero — the trailing fallow run is. The Evidence block
+		// what was zero — the trailing unused run is. The Evidence block
 		// directly above prints both, and one of them is often a non-zero peak.
 		s := fmt.Sprintf(
 			"Every utilization sample for these accelerators read exactly zero for the last %s. "+
@@ -191,7 +191,7 @@ func meaning(f *api.Finding) string {
 				"efficiently it ran — GPU utilization is a poor measure of that. It claims only "+
 				"what the metric can prove: no CUDA kernel was resident on these devices at any "+
 				"sampled moment in that time.",
-			Human(f.Evidence.FallowDuration.Duration()))
+			Human(f.Evidence.UnusedDuration.Duration()))
 		if f.Evidence.PowerDrawTDPRatio > 0 && f.Evidence.PowerDrawTDPRatio < 0.20 {
 			s += " Power draw independently agrees: the devices are drawing near-idle wattage."
 		}
@@ -209,7 +209,7 @@ func meaning(f *api.Finding) string {
 			"pod holding an accelerator — by extended resource, MIG profile, time-sliced replica or "+
 			"DRA claim — has been placed on them, and no accelerator on them has reported work in "+
 			"the last %s. They are not being drained, they are not cordoned, and they are past the "+
-			"initialisation grace period.", Human(f.Evidence.FallowDuration.Duration()))
+			"initialisation grace period.", Human(f.Evidence.UnusedDuration.Duration()))
 	}
 	return f.Summary
 }

@@ -75,7 +75,7 @@ The fields worth knowing:
 
 | path | meaning |
 |---|---|
-| `scan.gpuHoursFallow` / `scan.gpuHoursPaid` | the headline ratio, in accelerator-hours |
+| `scan.gpuHoursUnused` / `scan.gpuHoursPaid` | the headline ratio, in accelerator-hours |
 | `scan.acceleratorsAnalyzed` / `acceleratorsObserved` | always reconciles with `notAnalyzed` |
 | `recommendations[]` | findings you should act on |
 | `byDesign[]` | capacity held empty on purpose — **not** waste |

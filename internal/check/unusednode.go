@@ -101,7 +101,7 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 		if d.Util.Max > 0 {
 			// The device did work at some point. How long ago is the trailing
 			// zero run; if it is still working, that is zero.
-			if idle, ok := d.Util.FallowFor(cl.Now); ok {
+			if idle, ok := d.Util.UnusedFor(cl.Now); ok {
 				since = idle
 			}
 		} else {
@@ -119,7 +119,7 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 			if d.Util.Completeness < minCompleteness {
 				continue
 			}
-			idle, ok := d.Util.FallowFor(cl.Now)
+			idle, ok := d.Util.UnusedFor(cl.Now)
 			if !ok {
 				continue
 			}
@@ -160,7 +160,7 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 		nodeHours map[string]float64
 		blockers  []api.Blocker
 
-		// The reported fallow duration is the longest across the pool, so the
+		// The reported unused duration is the longest across the pool, so the
 		// evidence label has to describe *that* node. Recording only that some
 		// node in the pool was measured lets one node's measurement vouch for
 		// a different node's unmeasured age — which is precisely the
@@ -242,7 +242,7 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 			agg.nodeHours = map[string]float64{}
 		}
 
-		// How long has this been fallow? The node's age is only an upper bound
+		// How long has this been unused? The node's age is only an upper bound
 		// — it says how long the node *could* have been empty, not how long it
 		// was. Where the accelerators on it were measured, the trailing run of
 		// zero utilization is the actual observation, and the shorter of the
@@ -284,7 +284,7 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 		} else {
 			agg.anyUnmeasured = true
 		}
-		// Cap each node before it joins the total. Nothing can be fallow for
+		// Cap each node before it joins the total. Nothing can be unused for
 		// longer than the window that was examined, and scaling the finished
 		// aggregate instead would shrink the nodes that were already inside
 		// the window to pay for the one that was not.
@@ -326,12 +326,12 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 		agg := pools[pool]
 		sort.Strings(agg.nodes)
 
-		fallow := agg.oldest
+		unused := agg.oldest
 		// The hours were capped node by node as they were accumulated, so the
 		// total needs no further adjustment; only the headline duration does.
 		hours := agg.hours
-		if fallow > cl.Window {
-			fallow = cl.Window
+		if unused > cl.Window {
+			unused = cl.Window
 		}
 
 		// The reported duration is one specific node's, so the note names it
@@ -369,19 +369,19 @@ func (UnusedNode) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]R
 				Nodes: agg.nodes,
 			},
 			Devices:     nodeDeviceIDs(cl, agg.nodes),
-			Fallow:      fallow,
-			FallowHours: hours,
+			Unused:      unused,
+			UnusedHours: hours,
 			Confidence:  durationConfidence(agg.oldestMeasured, agg.oldestAnySeries),
 			Evidence: api.Evidence{
 				Window:             api.ISODuration(cl.Window),
-				FallowDuration:     api.ISODuration(fallow),
+				UnusedDuration:     api.ISODuration(unused),
 				SampleCompleteness: agg.oldestCompleteness,
 				Notes:              notes,
 			},
 			Blockers: dedupeBlockers(agg.blockers),
 			Summary: fmt.Sprintf("%d %s on pool/%s have had no workload scheduled for %s",
 				agg.devices, humanize.Plural(agg.devices, "accelerator"),
-				pool, humanize.Duration(fallow)),
+				pool, humanize.Duration(unused)),
 		}
 
 		// A deliberate floor is capacity doing its job. Reporting it as waste,
@@ -473,9 +473,9 @@ func narrowToNodes(cl *inventory.Cluster, f RawFinding, nodes []string, nodeHour
 	// The hours have to be re-added from the nodes that were kept. Carrying
 	// the whole pool's total onto a narrowed finding would bill the operator
 	// for the reserved nodes this narrowing exists to exclude.
-	f.FallowHours = 0
+	f.UnusedHours = 0
 	for _, n := range nodes {
-		f.FallowHours += nodeHours[n]
+		f.UnusedHours += nodeHours[n]
 	}
 	return f
 }
@@ -497,7 +497,7 @@ func atMost(current, cap string) string {
 	return current
 }
 
-// durationConfidence rates the reported fallow duration, not the emptiness.
+// durationConfidence rates the reported unused duration, not the emptiness.
 //
 // That the pool holds no accelerator workload is read from the API server and
 // is not in doubt. How long that has been true is a different claim with

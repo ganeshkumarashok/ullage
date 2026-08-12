@@ -155,9 +155,9 @@ func TestUnusedNodeWillNotPriceAnUnmeasuredNodeConfidently(t *testing.T) {
 	}
 	if got[0].Confidence != api.EvidenceLow {
 		t.Fatalf("Confidence = %q for a node with no utilization series at all; the reported "+
-			"%s of fallow is the node's age, not a measurement, and at medium or above it is "+
+			"%s of unused is the node's age, not a measurement, and at medium or above it is "+
 			"shown by default and priced as though it had been observed",
-			got[0].Confidence, got[0].Fallow)
+			got[0].Confidence, got[0].Unused)
 	}
 }
 

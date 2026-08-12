@@ -420,7 +420,7 @@ type Stats struct {
 	Mean           float64
 	LastNonZero    *time.Time
 	ZeroThroughout bool
-	FallowSince    time.Time
+	UnusedSince    time.Time
 	Completeness   float64
 	Buckets        []float64
 	Samples        int
@@ -435,7 +435,7 @@ type Stats struct {
 // finding defensible, and it is why a workload that ran for ten minutes in a
 // fortnight is not reported: real work in the window resets the claim.
 func Summarise(s Series, start, end time.Time, step time.Duration, buckets int) Stats {
-	st := Stats{ZeroThroughout: true, FallowSince: start, Samples: len(s.Samples)}
+	st := Stats{ZeroThroughout: true, UnusedSince: start, Samples: len(s.Samples)}
 	if len(s.Samples) == 0 {
 		st.ZeroThroughout = false
 		return st
@@ -456,7 +456,7 @@ func Summarise(s Series, start, end time.Time, step time.Duration, buckets int) 
 	st.Mean = sum / float64(len(s.Samples))
 
 	if st.LastNonZero != nil {
-		st.FallowSince = *st.LastNonZero
+		st.UnusedSince = *st.LastNonZero
 	}
 
 	expected := int(end.Sub(start)/step) + 1

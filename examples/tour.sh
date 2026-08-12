@@ -71,7 +71,7 @@ step "3. Notice what it refused to do" \
         owner is a CRD ullage does not recognise, it names the resource and
         emits no command at all.
 
-      · 16 accelerators appear under 'fallow by design', with no fix attached.
+      · 16 accelerators appear under 'unused by design', with no fix attached.
         They are held open by a cluster-autoscaler minimum. Capacity reserved
         on purpose is not waste, and a tool that cannot tell the difference
         gets uninstalled the first time it confuses them.
@@ -96,7 +96,7 @@ step "5. Feed it to something else" \
 "    The JSON is a contract, not a debug dump: pkg/ullage/api round-trips it,
     and a test compares re-marshalled bytes so a field cannot quietly vanish."
 run bash -c "'$ULLAGE' demo --output json 2>/dev/null | jq '{
-    fallowHours: .scan.gpuHoursFallow,
+    unusedHours: .scan.gpuHoursUnused,
     worst: (.recommendations[0] | {id, owner: .owner.identity, cost: .impact.windowCost, fix: .fix.command})
   }'"
 

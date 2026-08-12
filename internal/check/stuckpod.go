@@ -149,18 +149,18 @@ func (StuckPod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Raw
 				// ones. Scaling it to zero to fix a crash loop would stop them.
 				PartialOwner: len(g.pods) < running[key],
 			},
-			Fallow: held,
-			// Fallow above is the longest a single pod was stuck, which is
-			// what the summary talks about. FallowHours is what the group
+			Unused: held,
+			// Unused above is the longest a single pod was stuck, which is
+			// what the summary talks about. UnusedHours is what the group
 			// actually cost, and it is what ranking and pricing use.
-			FallowHours: g.hours,
+			UnusedHours: g.hours,
 			// State is directly observed from the API server rather than
 			// inferred from a sampled series, so there is nothing to be
 			// uncertain about.
 			Confidence: api.EvidenceHigh,
 			Evidence: api.Evidence{
 				Window:             api.ISODuration(cl.Window),
-				FallowDuration:     api.ISODuration(held),
+				UnusedDuration:     api.ISODuration(held),
 				SampleCompleteness: 1,
 				Notes:              notes,
 			},

@@ -4,7 +4,7 @@ What ullage intends to do next, and — as importantly — what it does not inte
 to do. If something you need is in the "not planned" list, that is an invitation
 to argue, not a closed door.
 
-## Now (v0.1)
+## Now (v0.2)
 
 Three checks, read-only, NVIDIA via DCGM, one binary, one runtime dependency.
 

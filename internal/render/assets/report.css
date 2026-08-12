@@ -15,11 +15,11 @@
   --ink-faint: #85827a;
   --rule: #e3e0d8;
 
-  /* Fallow is the subject of the report, so it gets the one warm accent.
+  /* Unused is the subject of the report, so it gets the one warm accent.
    * Everything ullage declined to call waste is deliberately cooler and
    * quieter than the thing it is asking you to look at. */
-  --fallow: #b45309;
-  --fallow-soft: #fde9c8;
+  --unused: #b45309;
+  --unused-soft: #fde9c8;
   --design: #1d4ed8;
   --design-soft: #dbe6fe;
   --neutral: #9a968c;
@@ -40,8 +40,8 @@
     --ink-soft: #b8b4ab;
     --ink-faint: #85817a;
     --rule: #35333c;
-    --fallow: #fbbf24;
-    --fallow-soft: #45320f;
+    --unused: #fbbf24;
+    --unused-soft: #45320f;
     --design: #93b4fd;
     --design-soft: #1e2a4d;
     --neutral: #6f6b64;
@@ -103,7 +103,7 @@ a { color: inherit; }
 .headline { margin: 2rem 0 0.35rem; }
 .headline .big {
   font-size: clamp(2.1rem, 6vw, 3.2rem); font-weight: 700;
-  letter-spacing: -0.03em; line-height: 1.05; color: var(--fallow);
+  letter-spacing: -0.03em; line-height: 1.05; color: var(--unused);
 }
 .headline .qualifier { font-size: 1rem; color: var(--ink-soft); margin-top: 0.35rem; }
 
@@ -129,11 +129,11 @@ h2 {
 
 .waterfall { width: 100%; height: auto; display: block; }
 .waterfall .track { fill: var(--neutral-soft); }
-.waterfall .bar-fallow { fill: var(--fallow); }
+.waterfall .bar-unused { fill: var(--unused); }
 .waterfall .bar-design { fill: var(--design); }
 .waterfall .bar-neutral { fill: var(--neutral); }
 .waterfall .bar-residual { fill: var(--residual); }
-.waterfall .bar-suppressed { fill: var(--fallow); opacity: 0.45; }
+.waterfall .bar-suppressed { fill: var(--unused); opacity: 0.45; }
 .waterfall .connector { stroke: var(--rule); stroke-width: 1; stroke-dasharray: 2 3; }
 .waterfall text { fill: var(--ink); font-size: 12px; }
 .waterfall .lbl { font-weight: 600; }
@@ -161,11 +161,11 @@ tr.total td { border-top: 2px solid var(--ink); font-weight: 700; }
   display: inline-block; width: 0.65rem; height: 0.65rem; border-radius: 2px;
   margin-right: 0.5rem; vertical-align: baseline; border: 1px solid rgba(0,0,0,.18);
 }
-.sw-fallow { background: var(--fallow); }
+.sw-unused { background: var(--unused); }
 .sw-design { background: var(--design); }
 .sw-neutral { background: var(--neutral); }
 .sw-residual { background: var(--residual); }
-.sw-suppressed { background: var(--fallow); opacity: 0.45; }
+.sw-suppressed { background: var(--unused); opacity: 0.45; }
 
 .rownote { display: block; color: var(--ink-faint); font-size: 0.78rem; margin-top: 0.15rem; }
 
@@ -178,7 +178,7 @@ tr.total td { border-top: 2px solid var(--ink); font-weight: 700; }
 .owner-name { font-weight: 600; }
 .owner-fig { color: var(--ink-soft); font-size: 0.85rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .owner-track { background: var(--neutral-soft); border-radius: 3px; height: 0.5rem; margin-top: 0.4rem; overflow: hidden; }
-.owner-fill { background: var(--fallow); height: 100%; border-radius: 3px; }
+.owner-fill { background: var(--unused); height: 100%; border-radius: 3px; }
 
 /* ---------- findings ---------- */
 
@@ -192,7 +192,7 @@ details.finding > summary {
   display: grid; grid-template-columns: 2.2rem 1fr auto; gap: 0.75rem; align-items: baseline;
 }
 details.finding > summary::-webkit-details-marker { display: none; }
-summary:focus-visible { outline: 2px solid var(--fallow); outline-offset: 2px; }
+summary:focus-visible { outline: 2px solid var(--unused); outline-offset: 2px; }
 
 .rank { color: var(--ink-faint); font-variant-numeric: tabular-nums; font-size: 0.85rem; }
 .subject { font-weight: 600; }
@@ -212,7 +212,7 @@ summary:focus-visible { outline: 2px solid var(--fallow); outline-offset: 2px; }
 }
 /* Confidence is carried by the word itself as well as the border, so it
  * survives greyscale printing and colour-blind readers. */
-.badge.conf-high { border-color: var(--fallow); color: var(--fallow); font-weight: 600; }
+.badge.conf-high { border-color: var(--unused); color: var(--unused); font-weight: 600; }
 .badge.conf-medium { border-style: dashed; }
 .badge.conf-low { border-style: dotted; font-style: italic; }
 .badge.design { border-color: var(--design); color: var(--design); }
@@ -241,7 +241,7 @@ button.copy {
   font-family: inherit; white-space: nowrap;
 }
 button.copy:hover { border-color: var(--ink-faint); }
-button.copy:focus-visible { outline: 2px solid var(--fallow); outline-offset: 2px; }
+button.copy:focus-visible { outline: 2px solid var(--unused); outline-offset: 2px; }
 
 .blocked { color: var(--ink-soft); font-size: 0.88rem; }
 
@@ -277,13 +277,13 @@ ul.rules {
 ul.rules li { margin-bottom: 0.45rem; line-height: 1.55; }
 
 /* A signal being absent is the reader's blind spot, so it is marked in the
-   same warning colour the fallow figures use rather than in quiet grey. */
+   same warning colour the unused figures use rather than in quiet grey. */
 .yes, .no {
   font-size: 0.78rem; font-weight: 600;
   white-space: nowrap;
 }
 .yes { color: var(--residual); }
-.no { color: var(--fallow); }
+.no { color: var(--unused); }
 
 footer {
   margin-top: 3.5rem; padding-top: 1.25rem; border-top: 1px solid var(--rule);

@@ -202,7 +202,7 @@ func TestMissingEngineMetricsAreDisclosedNotAssumedIdle(t *testing.T) {
 // The check computes the honest per-device total; the pipeline is what turns it
 // into the number the report prints, prices and ranks by. Without this, the
 // wiring between them can be cut and every check-level test still passes.
-func TestEnrichBillsTheSummedFallowHoursNotTheProduct(t *testing.T) {
+func TestEnrichBillsTheSummedUnusedHoursNotTheProduct(t *testing.T) {
 	cl := &inventory.Cluster{
 		Context: "test",
 		Now:     time.Date(2026, 8, 11, 0, 0, 0, 0, time.UTC),
@@ -225,14 +225,14 @@ func TestEnrichBillsTheSummedFallowHoursNotTheProduct(t *testing.T) {
 		Devices: []string{"n/0", "n/1"},
 		// One device idle a fortnight, one idle a day: 360 device-hours, not
 		// the 672 that two devices times the longest run would give.
-		Fallow:      14 * 24 * time.Hour,
-		FallowHours: 14*24 + 24,
+		Unused:      14 * 24 * time.Hour,
+		UnusedHours: 14*24 + 24,
 		Confidence:  api.EvidenceHigh,
 	}
 
-	got := enrich(cl, rf, Options{}).Impact.GPUHoursFallow
+	got := enrich(cl, rf, Options{}).Impact.GPUHoursUnused
 	if got != 360 {
-		t.Fatalf("GPUHoursFallow = %.0f, want 360: the check measured 360 device-hours and "+
+		t.Fatalf("GPUHoursUnused = %.0f, want 360: the check measured 360 device-hours and "+
 			"the pipeline reported %.0f, so the honest figure never reaches the report, "+
 			"the ranking or the price", got, got)
 	}
@@ -261,12 +261,12 @@ func TestEnrichFallsBackToTheProductWhenNoTotalIsGiven(t *testing.T) {
 		Check:      api.CheckUnusedNode,
 		Subject:    check.Subject{Kind: "node-pool", Name: "gpu", Pool: "gpu", Nodes: []string{"n"}},
 		Devices:    []string{"n/0", "n/1"},
-		Fallow:     48 * time.Hour,
+		Unused:     48 * time.Hour,
 		Confidence: api.EvidenceHigh,
 	}
 
-	if got := enrich(cl, rf, Options{}).Impact.GPUHoursFallow; got != 96 {
-		t.Fatalf("GPUHoursFallow = %.0f, want 96 from two devices times 48h", got)
+	if got := enrich(cl, rf, Options{}).Impact.GPUHoursUnused; got != 96 {
+		t.Fatalf("GPUHoursUnused = %.0f, want 96 from two devices times 48h", got)
 	}
 }
 

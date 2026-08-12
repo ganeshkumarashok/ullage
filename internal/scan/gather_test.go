@@ -162,10 +162,10 @@ func TestRefineWillNotClaimIdlenessFromBeforeTheFirstSample(t *testing.T) {
 	st := &inventory.Stats{}
 	refine(st, series(sample(20*time.Hour, 0), sample(21*time.Hour, 0), sample(22*time.Hour, 0)), base, end, step)
 
-	if st.FallowSince.Before(at(20 * time.Hour)) {
-		t.Fatalf("FallowSince = %v, before the first sample at %v. A device cannot give "+
+	if st.UnusedSince.Before(at(20 * time.Hour)) {
+		t.Fatalf("UnusedSince = %v, before the first sample at %v. A device cannot give "+
 			"evidence about time before it was being watched, and dating idleness to the "+
-			"window's start invents nearly a day of it", st.FallowSince, at(20*time.Hour))
+			"window's start invents nearly a day of it", st.UnusedSince, at(20*time.Hour))
 	}
 }
 
@@ -210,8 +210,8 @@ func cost(v float64) *float64 { return &v }
 
 func TestPricedFindingsRankAboveUnpricedOnes(t *testing.T) {
 	f := []api.Finding{
-		{ID: "unpriced", Impact: api.Impact{GPUHoursFallow: 5000}},
-		{ID: "priced", Impact: api.Impact{WindowCost: cost(10), GPUHoursFallow: 1}},
+		{ID: "unpriced", Impact: api.Impact{GPUHoursUnused: 5000}},
+		{ID: "priced", Impact: api.Impact{WindowCost: cost(10), GPUHoursUnused: 1}},
 	}
 	sortFindings(f)
 	if f[0].ID != "priced" {
@@ -224,8 +224,8 @@ func TestPricedFindingsRankAboveUnpricedOnes(t *testing.T) {
 // one, so ranking by hours puts the smallest finding first.
 func TestRankingFollowsMoneyNotHours(t *testing.T) {
 	f := []api.Finding{
-		{ID: "many-cheap-hours", Impact: api.Impact{WindowCost: cost(900), GPUHoursFallow: 2700}},
-		{ID: "fewer-costly-hours", Impact: api.Impact{WindowCost: cost(2800), GPUHoursFallow: 1000}},
+		{ID: "many-cheap-hours", Impact: api.Impact{WindowCost: cost(900), GPUHoursUnused: 2700}},
+		{ID: "fewer-costly-hours", Impact: api.Impact{WindowCost: cost(2800), GPUHoursUnused: 1000}},
 	}
 	sortFindings(f)
 	if f[0].ID != "fewer-costly-hours" {
@@ -235,8 +235,8 @@ func TestRankingFollowsMoneyNotHours(t *testing.T) {
 
 func TestUnpricedFindingsRankAmongThemselvesByHours(t *testing.T) {
 	f := []api.Finding{
-		{ID: "small", Impact: api.Impact{GPUHoursFallow: 10}},
-		{ID: "large", Impact: api.Impact{GPUHoursFallow: 900}},
+		{ID: "small", Impact: api.Impact{GPUHoursUnused: 10}},
+		{ID: "large", Impact: api.Impact{GPUHoursUnused: 900}},
 	}
 	sortFindings(f)
 	if f[0].ID != "large" {
@@ -247,12 +247,12 @@ func TestUnpricedFindingsRankAmongThemselvesByHours(t *testing.T) {
 func TestRankingIsStableOnAnUnchangedCluster(t *testing.T) {
 	build := func() []api.Finding {
 		return []api.Finding{
-			{ID: "c", Impact: api.Impact{WindowCost: cost(5), GPUHoursFallow: 2},
-				Evidence: api.Evidence{FallowDuration: api.ISODuration(time.Hour)}},
-			{ID: "a", Impact: api.Impact{WindowCost: cost(5), GPUHoursFallow: 2},
-				Evidence: api.Evidence{FallowDuration: api.ISODuration(time.Hour)}},
-			{ID: "b", Impact: api.Impact{WindowCost: cost(5), GPUHoursFallow: 2},
-				Evidence: api.Evidence{FallowDuration: api.ISODuration(time.Hour)}},
+			{ID: "c", Impact: api.Impact{WindowCost: cost(5), GPUHoursUnused: 2},
+				Evidence: api.Evidence{UnusedDuration: api.ISODuration(time.Hour)}},
+			{ID: "a", Impact: api.Impact{WindowCost: cost(5), GPUHoursUnused: 2},
+				Evidence: api.Evidence{UnusedDuration: api.ISODuration(time.Hour)}},
+			{ID: "b", Impact: api.Impact{WindowCost: cost(5), GPUHoursUnused: 2},
+				Evidence: api.Evidence{UnusedDuration: api.ISODuration(time.Hour)}},
 		}
 	}
 	f := build()

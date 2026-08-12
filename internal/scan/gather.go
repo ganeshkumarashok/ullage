@@ -569,7 +569,7 @@ func (g *Gatherer) devices(ctx context.Context, schema promql.LabelSchema, inv *
 			Max:            s.Value,
 			ZeroThroughout: s.Value == 0 && busyOn == "",
 			BusyEngine:     busyOn,
-			FallowSince:    start,
+			UnusedSince:    start,
 			// Capped by how much of the window the max query answered for.
 			// Sample counts come from a separate query, so without this cap a
 			// device whose max chunks half failed still reports full coverage
@@ -608,16 +608,16 @@ func refine(st *inventory.Stats, s promql.Series, start, end time.Time, step tim
 	st.Buckets = sum.Buckets
 	st.Mean = sum.Mean
 	st.LastNonZero = sum.LastNonZero
-	if sum.FallowSince.After(st.FallowSince) {
-		st.FallowSince = sum.FallowSince
+	if sum.UnusedSince.After(st.UnusedSince) {
+		st.UnusedSince = sum.UnusedSince
 	}
-	// A series that never read non-zero has no FallowSince of its own, so it
+	// A series that never read non-zero has no UnusedSince of its own, so it
 	// would otherwise claim to have been idle since the window opened — even if
 	// its first sample landed yesterday because the node joined then. A device
 	// cannot give evidence about time before it was being watched.
 	if sum.LastNonZero == nil && len(s.Samples) > 0 {
-		if first := s.Samples[0].T; first.After(st.FallowSince) {
-			st.FallowSince = first
+		if first := s.Samples[0].T; first.After(st.UnusedSince) {
+			st.UnusedSince = first
 		}
 	}
 	// The coarse series is a downsample, so it can only ever contradict a zero

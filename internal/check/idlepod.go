@@ -61,7 +61,7 @@ func (c IdlePod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Ra
 	type group struct {
 		pods    []inventory.PodRef
 		devices []inventory.Device
-		fallow  time.Duration
+		unused  time.Duration
 		// Per-device idle time, so the group can be billed for what each
 		// device actually wasted rather than for its longest member.
 		hours float64
@@ -104,7 +104,7 @@ func (c IdlePod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Ra
 			}
 		}
 
-		idle, fallow, completeness := true, cl.Window, 1.0
+		idle, unused, completeness := true, cl.Window, 1.0
 		each := map[string]time.Duration{}
 		for _, d := range devs {
 			if !c.Applicable(d) {
@@ -118,13 +118,13 @@ func (c IdlePod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Ra
 				idle = false
 				break
 			}
-			since, ok := d.Util.FallowFor(cl.Now)
+			since, ok := d.Util.UnusedFor(cl.Now)
 			if !ok {
 				idle = false
 				break
 			}
-			if since < fallow {
-				fallow = since
+			if since < unused {
+				unused = since
 			}
 			each[d.ID] = since
 			// The holder's own series, not the physical device's summed
@@ -138,10 +138,10 @@ func (c IdlePod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Ra
 		// A gap large enough to hide a working period disqualifies the finding
 		// outright rather than merely lowering its confidence.
 		// A pod cannot have been idle for longer than it has existed.
-		if fallow > span {
-			fallow = span
+		if unused > span {
+			unused = span
 		}
-		if !idle || completeness < minCompleteness || fallow < p.IdleThreshold {
+		if !idle || completeness < minCompleteness || unused < p.IdleThreshold {
 			continue
 		}
 
@@ -160,8 +160,8 @@ func (c IdlePod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Ra
 		}
 		g.pods = append(g.pods, pod.Ref)
 		g.devices = append(g.devices, devs...)
-		if fallow > g.fallow {
-			g.fallow = fallow
+		if unused > g.unused {
+			g.unused = unused
 		}
 		// Each device is capped by the pod's own lifetime for the same reason
 		// the headline is: a device cannot have been idle under a pod for
@@ -183,7 +183,7 @@ func (c IdlePod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Ra
 		sort.Slice(g.pods, func(i, j int) bool { return g.pods[i].Name < g.pods[j].Name })
 
 		pod := podByRef(cl, g.pods[0])
-		ev, conf := summariseIdle(g.devices, cl.Window, g.fallow, g.completeness)
+		ev, conf := summariseIdle(g.devices, cl.Window, g.unused, g.completeness)
 
 		subject := Subject{
 			Kind:      "workload",
@@ -198,13 +198,13 @@ func (c IdlePod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Ra
 			Check:       api.CheckIdlePod,
 			Subject:     subject,
 			Devices:     deviceIDs(g.devices),
-			Fallow:      g.fallow,
-			FallowHours: g.hours,
+			Unused:      g.unused,
+			UnusedHours: g.hours,
 			Confidence:  conf,
 			Evidence:    ev,
 			Summary: fmt.Sprintf("%d %s held with no work for %s",
 				len(g.devices), humanize.Plural(len(g.devices), "accelerator"),
-				humanize.Duration(g.fallow)),
+				humanize.Duration(g.unused)),
 		})
 	}
 	return out, nil
@@ -216,10 +216,10 @@ func (c IdlePod) Run(ctx context.Context, cl *inventory.Cluster, p Params) ([]Ra
 // measured coverage over the pod's own lifetime and that is the number the
 // finding was judged on. Recomputing it here against the scan window instead
 // printed "0.4% coverage" beside a claim that had just passed an 80% gate.
-func summariseIdle(devices []inventory.Device, window, fallow time.Duration, completeness float64) (api.Evidence, string) {
+func summariseIdle(devices []inventory.Device, window, unused time.Duration, completeness float64) (api.Evidence, string) {
 	ev := api.Evidence{
 		Window:             api.ISODuration(window),
-		FallowDuration:     api.ISODuration(fallow),
+		UnusedDuration:     api.ISODuration(unused),
 		SampleCompleteness: completeness,
 	}
 	powerSum, powerN := 0.0, 0
@@ -281,7 +281,7 @@ func summariseIdle(devices []inventory.Device, window, fallow time.Duration, com
 		return ev, api.EvidenceMedium
 	case !corroborated:
 		return ev, api.EvidenceMedium
-	case !allWindow && fallow < window/2:
+	case !allWindow && unused < window/2:
 		return ev, api.EvidenceMedium
 	default:
 		return ev, api.EvidenceHigh
@@ -306,7 +306,7 @@ func deviceIDs(devices []inventory.Device) []string {
 // because those are the ones a scale-to-zero would stop mid-work; a pod that is
 // crash-looping is holding a device but is not doing anything that stopping it
 // would interrupt. A Running pod that a check excluded for any reason -- thin
-// metric coverage, too short a fallow run -- still counts, because "we did not
+// metric coverage, too short a unused run -- still counts, because "we did not
 // establish that this replica is idle" and "this replica is idle" must not
 // produce the same command.
 func runningAcceleratorPodsByOwner(cl *inventory.Cluster) map[string]int {

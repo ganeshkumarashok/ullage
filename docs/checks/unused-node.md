@@ -62,7 +62,7 @@ ullage reports the taints and labels alongside the finding for this reason.
 - **The pool is reserved.** This is the single most common false positive, and
   it is not really a false positive — the measurement is correct and the
   conclusion is not. Mark reserved pools (see below) and ullage will account
-  for them separately as *fallow by design*, which keeps them out of the
+  for them separately as *unused by design*, which keeps them out of the
   actionable list without hiding them from the totals.
 - **The window straddles a quiet period.** A pool that serves a monthly close
   reads empty for most windows.

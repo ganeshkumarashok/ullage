@@ -1,7 +1,7 @@
 # A weekly scan that writes its result to stdout as JSON.
 #
 # Weekly, not hourly, and this is deliberate. ullage measures a two-week window
-# and reports capacity that has been fallow for days; running it every hour
+# and reports capacity that has been unused for days; running it every hour
 # produces the same findings sixty times over and trains everyone to ignore it.
 # The failure mode of this category of tool is not missing a finding, it is
 # becoming background noise.

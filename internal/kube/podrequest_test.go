@@ -32,7 +32,7 @@ func TestInitContainerGPURequestCounts(t *testing.T) {
 // Kubernetes' effective request is max(sum(app), max(init)), not the sum of
 // everything. Adding them would double-count a pod that requests a GPU in both
 // places -- the init container has exited by the time the app container runs --
-// and inflate every fallow-hour figure derived from the count.
+// and inflate every unused-hour figure derived from the count.
 func TestInitAndAppRequestsTakeTheMaximumNotTheSum(t *testing.T) {
 	p := &Pod{}
 	p.Spec.InitContainers = []Container{{Name: "fetch", Resources: gpuLimit("1")}}
