@@ -33,6 +33,29 @@ func Human(d time.Duration) string {
 	}
 }
 
+// ThresholdLabel renders a configured threshold exactly and compactly.
+//
+// Human pads to "1h 00m" so that durations line up in a table column, which is
+// wrong for a setting quoted in a sentence; HumanShort would round 90m to "1h",
+// which misstates what the scan actually did. Round values print as one unit and
+// anything else falls back to the padded form rather than lying.
+func ThresholdLabel(d time.Duration) string {
+	switch {
+	case d <= 0:
+		return "0"
+	case d%(24*time.Hour) == 0:
+		return fmt.Sprintf("%dd", d/(24*time.Hour))
+	case d%time.Hour == 0:
+		return fmt.Sprintf("%dh", d/time.Hour)
+	case d < time.Hour && d%time.Minute == 0:
+		return fmt.Sprintf("%dm", d/time.Minute)
+	default:
+		// Sub-hour remainders read better as "1h 30m" than as "90m", which
+		// stops being legible the moment the threshold is a few hours.
+		return Human(d)
+	}
+}
+
 // HumanShort is the table-column form: at most four characters.
 func HumanShort(d time.Duration) string {
 	switch {

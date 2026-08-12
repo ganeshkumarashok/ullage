@@ -1,5 +1,51 @@
 # Changelog
 
+## Saying how it measures, in both the README and the report
+
+Goal: a reader asked how the numbers are produced and could not find out. The
+README had no section describing the method, and the HTML report showed rich
+per-finding evidence without ever saying where any of it came from.
+
+Both gaps had the same cause, and the fix is the same fact in two places: the
+scan does not trust a single utilization gauge. It reads five signals -- SM,
+video encode, video decode, copy engines, framebuffer -- and treats a device as
+idle only when all of them were zero, corroborated against board power from a
+separate sensor. That is the strongest thing about the tool and it appeared
+nowhere a reader would look.
+
+- **README** gained a `How it measures` section: the four stages, the five
+  signals and why one gauge is not enough, the rules that make the scan refuse
+  to answer, and how paid hours are computed.
+- **The HTML report** gained a `How this was measured` section that names each
+  signal, marks which were actually available in that scan, and states the
+  refusal rules. A missing signal is now shown as the reader's blind spot
+  rather than being silently absent.
+- **`--explain-queries` printed 87 lines for 9 distinct queries**, because the
+  scan asks the same question of every device. It now prints each once,
+  labelled with the question it answers -- on the one surface whose purpose is
+  letting a sceptic check the work.
+
+Three bugs surfaced while doing it, each found by looking rather than by being
+reported:
+
+- **The report had been printing `idle >= 86400000000000`.** `api.ISODuration`
+  has no `String` method, so the template rendered raw nanoseconds. It was in
+  the footer, which is why nobody had noticed. Promoting thresholds into the
+  method section made it obvious.
+- **`ullage explain` read the wall clock** for its suppression example, so
+  identical input rendered differently depending on the day. Every pinned
+  documentation transcript began failing at midnight with nothing edited; this
+  fired on its own overnight. It follows the scan clock now.
+- **`enginesChecked` was never exposed in the API**, so no JSON consumer could
+  tell whether "no GPU work" meant "all five engines were quiet" or "the only
+  gauge available was SM". It is in the contract now.
+
+Every claim written into the README was checked against the code that
+implements it before being written, including the ones that turned out to need
+correcting: the coverage rule is two thresholds rather than one (below 80% no
+finding is produced; below 95% it is capped at medium), and the signal count
+had to stop describing power as a sixth engine when it is corroboration.
+
 ## v0.1.1 — released 2026-08-11
 
 Published v0.1.0, then verified every install path the README promises rather

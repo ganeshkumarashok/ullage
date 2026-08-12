@@ -504,6 +504,17 @@ type ScanMeta struct {
 	GPUHoursFallow   float64 `json:"gpuHoursFallow"`
 	ProfilingMetrics bool    `json:"profilingMetricsAvailable"`
 
+	// EnginesChecked names the accelerator engine metrics consulted beyond the
+	// SM utilization gauge -- the video encoder and decoder, the copy engines,
+	// and framebuffer residency.
+	//
+	// This changes what an idle claim means, so a consumer cannot interpret one
+	// without it. "No GPU work" from a scan that only saw SM activity is a
+	// materially weaker statement than one that also ruled out a video pipeline,
+	// a data loader, and a model held warm in framebuffer. Empty means only the
+	// SM gauge was available.
+	EnginesChecked []string `json:"enginesChecked,omitempty"`
+
 	// Queries is the exact PromQL issued, populated on request. The trust
 	// argument for this tool is that its claims are checkable, which is empty
 	// unless the queries are visible.

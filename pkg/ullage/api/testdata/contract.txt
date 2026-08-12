@@ -128,6 +128,7 @@ scan.allocationModels.dra integer
 scan.allocationModels.mig integer
 scan.allocationModels.timeSliced integer
 scan.context string
+scan.enginesChecked[] string
 scan.gpuHoursFallow number
 scan.gpuHoursNotAnalysed number
 scan.gpuHoursPaid number

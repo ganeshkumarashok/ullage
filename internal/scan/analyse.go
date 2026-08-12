@@ -122,6 +122,7 @@ func Analyse(ctx context.Context, cl *inventory.Cluster, inv *inventory.Inventor
 			GPUHoursPaid:         inv.PaidHours,
 			GPUHoursNotAnalysed:  inv.NotAnalysedHours,
 			ProfilingMetrics:     cl.ProfilingMetrics,
+			EnginesChecked:       cl.EnginesChecked,
 		},
 		Recommendations: []api.Finding{},
 		Suppressed:      []api.Finding{},

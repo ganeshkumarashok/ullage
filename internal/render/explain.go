@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
 	"github.com/ganeshkumarashok/ullage/pkg/ullage/api"
 )
@@ -165,11 +164,16 @@ func Explain(w io.Writer, f *api.Finding, res *api.Result, o Options) error {
 	// The finding id, not the workload reference. Suppressions match on the
 	// id, so printing the reference here produced an entry that could never
 	// match — following the tool's own printed advice silently did nothing.
-	// The example expiry is relative to today. A hardcoded date is guaranteed to
-	// become a date in the past, and copying it produces a suppression that
-	// expired before it was written.
+	// The example expiry is relative to the scan, not to a hardcoded date that
+	// is guaranteed to become a date in the past -- copying that produces a
+	// suppression which expired before it was written.
+	//
+	// It follows the scan clock rather than the wall clock so that the same
+	// result always renders the same text. Reading time.Now() here made this
+	// output change at midnight: every pinned transcript in the documentation
+	// began failing the next day, with nothing having been edited.
 	p.dim("  Suppress: ullage ignore %s --reason \"...\" --until %s",
-		f.ID, time.Now().AddDate(0, 3, 0).Format("2006-01-02"))
+		f.ID, res.Scan.Started.AddDate(0, 3, 0).Format("2006-01-02"))
 	p.dim("  Docs:     %s", f.Docs)
 	p.line("")
 	return p.err

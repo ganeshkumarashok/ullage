@@ -143,6 +143,89 @@
   </div>
 </section>
 
+<!-- How this was measured -->
+<section id="method">
+  <h2>How this was measured</h2>
+  <div class="panel">
+    <p class="lede">
+      Every figure above came from four steps, and each one was allowed to
+      answer <em>“I don’t know”</em>.
+    </p>
+
+    <ol class="method">
+      <li>
+        <strong>Count what is there.</strong> Nodes and pods were read from the
+        Kubernetes API. A device is judged only where one pod exclusively holds
+        one physical accelerator — the only case in which “the device was idle”
+        and “this workload was idle” mean the same thing. Shared and partitioned
+        devices are counted, then set aside.
+      </li>
+      <li>
+        <strong>Ask whether it did any work.</strong> Not one gauge — every
+        signal below. A device where <em>any</em> of them was ever non-zero is
+        not idle.
+      </li>
+      <li>
+        <strong>Measure how long it has been quiet.</strong> Fallow time is the
+        unbroken run of zeros up to now, not an average. Capacity is charged per
+        node for <code>min(node age, window) × accelerators</code>, so a node
+        created this morning is not billed for the whole window.
+      </li>
+      <li>
+        <strong>Find who can act.</strong> Ownership resolves pod → controller →
+        namespace. Each finding shows the label it was resolved from, so a wrong
+        answer is correctable rather than just annoying.
+      </li>
+    </ol>
+
+    <table>
+      <caption class="visually-hidden">Signals consulted when deciding a device did no work</caption>
+      <thead>
+        <tr>
+          <th scope="col">Signal</th>
+          <th scope="col">What it catches</th>
+          <th scope="col">In this scan</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Signals}}
+        <tr>
+          <td><code>{{.Metric}}</code></td>
+          <td>{{.Answers}}</td>
+          <td>{{if .Consulted}}<span class="yes">checked</span>{{else}}<span class="no">not available</span>{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    <p class="footnote">
+      SM utilization alone would have reported a video pipeline, a data loader,
+      or a warm model parked in framebuffer as doing nothing at all. Any signal
+      marked unavailable is a blind spot in the findings below, not an absence
+      of work.
+    </p>
+
+    <h3>When no claim is made</h3>
+    <ul class="rules">
+      <li><strong>Absent samples are not zero samples.</strong> A series that
+        returned nothing is unknown. Otherwise an exporter that died last week
+        would look like a fleet that stopped working.</li>
+      <li><strong>Disagreement wins.</strong> The aggregate and the stepped range
+        query are asked separately. When the aggregate proves work happened but
+        the range query cannot say when, nothing is reported.</li>
+      <li><strong>Thin evidence withdraws or caps the claim.</strong> Below 80%
+        sample coverage no finding is produced; below 95%, or with no power
+        series to corroborate, it is capped at medium confidence.</li>
+    </ul>
+
+    <p class="footnote">
+      Thresholds in force: idle ≥ {{.IdleLabel}}, stuck ≥
+      {{.StuckLabel}}, sampled every {{.StepLabel}}, showing
+      {{.MinConfidence}} confidence and above. Run
+      <code>ullage --explain-queries</code> for the exact PromQL.
+    </p>
+  </div>
+</section>
+
 <!-- Evidence quality -->
 {{if or .Exclusions .Warnings .HasCovers .UnmetDemand}}
 <section id="evidence">
@@ -386,9 +469,6 @@
     unused capacity was billed at, not savings that will appear on an invoice;
     releasing capacity only saves money if the underlying node goes away.</p>
   {{end}}
-  <p><strong>Thresholds.</strong>
-    idle ≥ {{.Params.IdleThreshold}}, stuck ≥ {{.Params.StuckThreshold}},
-    step {{.Params.Step}}, minimum confidence {{.MinConfidence}}.</p>
   <p>Generated {{.Generated}} by ullage {{.Version}}. This document made no
     network request to render, and contains no tracking of any kind.</p>
 </footer>

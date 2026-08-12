@@ -446,3 +446,34 @@ func TestExplainOmitsTheSparklineWhenThereIsNoData(t *testing.T) {
 		t.Fatalf("Explain printed a Utilization sparkline field with no sparkline data:\n%s", buf.String())
 	}
 }
+
+// The suppression example must be derived from the scan, not from the wall
+// clock.
+//
+// Reading time.Now() here made identical input render differently depending on
+// the day it was rendered, so every pinned transcript in the documentation
+// started failing at midnight with nothing having been edited -- and a stored
+// result re-rendered later described a suppression window it never had.
+func TestExplainSuppressExpiryFollowsTheScanClockNotTheWallClock(t *testing.T) {
+	f, res := explainFixture()
+	res.Scan.Started = time.Date(2026, 8, 11, 4, 0, 0, 0, time.UTC)
+
+	var buf bytes.Buffer
+	if err := Explain(&buf, f, res, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if want := "--until 2026-11-11"; !strings.Contains(buf.String(), want) {
+		t.Fatalf("suppress hint does not offer %q, so it is not derived from the scan time:\n%s",
+			want, buf.String())
+	}
+
+	// A different scan must move the date, or it is merely hardcoded.
+	res.Scan.Started = time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC)
+	buf.Reset()
+	if err := Explain(&buf, f, res, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if want := "--until 2025-04-15"; !strings.Contains(buf.String(), want) {
+		t.Fatalf("suppress hint does not track the scan time, want %q:\n%s", want, buf.String())
+	}
+}

@@ -107,6 +107,60 @@ type report struct {
 	PricingSource string
 	Params        api.Params
 	MinConfidence string
+
+	// Thresholds are pre-formatted because api.ISODuration has no String
+	// method, so a template that prints one directly renders the underlying
+	// nanosecond count -- "idle >= 86400000000000", which is how the footer
+	// read until this section put the numbers somewhere people look.
+	IdleLabel  string
+	StuckLabel string
+	StepLabel  string
+
+	Signals []signalView
+}
+
+// signalView is one metric the scan consulted, described by the question it
+// answers rather than by its DCGM field name.
+//
+// The report is read by people deciding whether to delete something expensive,
+// and "DCGM_FI_DEV_FB_USED" tells them nothing about whether they should. What
+// makes the number trustworthy is seeing that a warm model in framebuffer was
+// something the scan actively looked for -- and, when a series was missing,
+// that it knows it looked with one eye closed.
+type signalView struct {
+	Metric    string
+	Answers   string
+	Consulted bool
+}
+
+// signalCatalogue is every signal an idle claim can rest on, in the order a
+// reader meets them: compute first, then the engines an SM-only gauge misses,
+// then the independent corroboration.
+var signalCatalogue = []signalView{
+	{Metric: "DCGM_FI_DEV_GPU_UTIL", Answers: "compute on the SMs"},
+	{Metric: "DCGM_FI_DEV_ENC_UTIL", Answers: "video encoding"},
+	{Metric: "DCGM_FI_DEV_DEC_UTIL", Answers: "video decoding"},
+	{Metric: "DCGM_FI_DEV_MEM_COPY_UTIL", Answers: "host↔device copies: data loading, checkpointing"},
+	{Metric: "DCGM_FI_DEV_FB_USED", Answers: "a model held resident in framebuffer"},
+	{Metric: "DCGM_FI_DEV_POWER_USAGE", Answers: "board power, corroborating idle from a second sensor"},
+}
+
+// signalsFor marks which of the catalogue this scan actually had.
+func signalsFor(engines []string) []signalView {
+	have := make(map[string]bool, len(engines))
+	for _, e := range engines {
+		have[e] = true
+	}
+	out := make([]signalView, 0, len(signalCatalogue))
+	for _, s := range signalCatalogue {
+		// The SM gauge is the one series a scan cannot run without, and power
+		// is reported through its own warning rather than the engine list.
+		s.Consulted = have[s.Metric] ||
+			s.Metric == "DCGM_FI_DEV_GPU_UTIL" ||
+			s.Metric == "DCGM_FI_DEV_POWER_USAGE"
+		out = append(out, s)
+	}
+	return out
 }
 
 type findingView struct {
@@ -182,6 +236,10 @@ func buildReport(res *api.Result, o HTMLOptions) report {
 		PricingSource: pricingSource(res),
 		Params:        res.Scan.Params,
 		MinConfidence: res.Scan.Params.MinConfidence,
+		Signals:       signalsFor(res.Scan.EnginesChecked),
+		IdleLabel:     ThresholdLabel(res.Scan.Params.IdleThreshold.Duration()),
+		StuckLabel:    ThresholdLabel(res.Scan.Params.StuckThreshold.Duration()),
+		StepLabel:     ThresholdLabel(res.Scan.Params.Step.Duration()),
 	}
 
 	if o.Redact {

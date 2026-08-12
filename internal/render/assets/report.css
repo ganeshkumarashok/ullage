@@ -257,6 +257,34 @@ button.copy:focus-visible { outline: 2px solid var(--fallow); outline-offset: 2p
 
 .footnote { color: var(--ink-faint); font-size: 0.8rem; margin-top: 0.75rem; }
 
+/* How this was measured. The numbered steps carry the narrative, so they are
+   given room to read as prose rather than as a dense reference list. */
+ol.method {
+  margin: 0 0 1.5rem; padding-left: 1.35rem;
+  color: var(--ink-soft); max-width: 48rem;
+}
+ol.method li { margin-bottom: 0.7rem; line-height: 1.55; }
+ol.method strong, ul.rules strong { color: var(--ink); }
+
+#method h3 {
+  font-size: 0.95rem; margin: 1.6rem 0 0.5rem;
+  letter-spacing: 0.01em;
+}
+ul.rules {
+  margin: 0; padding-left: 1.35rem;
+  color: var(--ink-soft); max-width: 48rem;
+}
+ul.rules li { margin-bottom: 0.45rem; line-height: 1.55; }
+
+/* A signal being absent is the reader's blind spot, so it is marked in the
+   same warning colour the fallow figures use rather than in quiet grey. */
+.yes, .no {
+  font-size: 0.78rem; font-weight: 600;
+  white-space: nowrap;
+}
+.yes { color: var(--residual); }
+.no { color: var(--fallow); }
+
 footer {
   margin-top: 3.5rem; padding-top: 1.25rem; border-top: 1px solid var(--rule);
   color: var(--ink-faint); font-size: 0.8rem;

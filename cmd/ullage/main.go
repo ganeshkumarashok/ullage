@@ -421,9 +421,7 @@ func cmdScan(ctx context.Context, args []string, override func(*ullage.Options))
 	}
 
 	if f.explainQ {
-		for _, q := range res.Scan.Queries {
-			fmt.Println(q)
-		}
+		explainQueries(os.Stdout, res.Scan.Queries)
 		return nil
 	}
 	return emit(res, f)

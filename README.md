@@ -25,6 +25,7 @@ is safe, and the one that identifies what is blocking it where it is not.
 It is a measurement, not a verdict. It never writes to your cluster.
 
 **[Thirty seconds](#thirty-seconds)** ·
+[How it measures](#how-it-measures) ·
 [Why another tool](#why-another-tool) ·
 [How it compares](#how-it-compares) ·
 [What it will not do](#what-it-will-not-do) ·
@@ -208,6 +209,99 @@ the same demo cluster, and none of them touch anything real:
 | `make tour` | the two-minute version of the whole idea, including what the tool deliberately refuses to claim — which is the interesting part |
 | [`examples/ci-gate.sh`](examples/ci-gate.sh) | a build failing when waste goes over a budget, and why a scan that broke must not exit like a scan that found nothing |
 | [`examples/weekly-digest.sh`](examples/weekly-digest.sh) | one scan turned into a Markdown report grouped by owner, with `jq` |
+
+## How it measures
+
+Four stages. Each one is allowed to answer *"I don't know"*, and the interesting
+engineering is in what makes it refuse.
+
+```
+   Kubernetes API                   Prometheus
+   nodes · pods · controllers       DCGM metrics
+   PDBs · resource claims           per device
+          │                                │
+          └───────────────┬────────────────┘
+                          ▼
+   1. census ─▶ 2. measure ─▶ 3. judge ─▶ 4. attribute
+   what is      did it do     is that     who can
+   there?       any work?     waste?      act on it
+                                               │
+                                               ▼
+                                  a recommendation, ranked
+                                  by what it is costing
+```
+
+**1. Census — what hardware is there, and can it be judged at all.**
+Nodes are read from the Kubernetes API and classified by how their accelerators
+are allocated. A device gets measured only when one pod exclusively holds one
+physical device, because that is the only arrangement in which "the device was
+idle" and "this workload was idle" are the same sentence. Time-sliced and MIG
+devices are counted and then set aside — device-level utilization there reflects
+every co-tenant, so it cannot convict any single pod. Nothing that is set aside
+leaves the accounting; it appears as **No usable metric**.
+
+**2. Measure — five signals, not one gauge.**
+`DCGM_FI_DEV_GPU_UTIL` reports SM activity alone, and a device can read exactly
+zero for a fortnight while doing continuous, expensive, real work: a video
+pipeline living on NVENC/NVDEC, a data loader saturating the copy engines, or a
+model held resident in framebuffer — which is the entire point of a warm
+replica, and precisely what someone would be furious to have scaled to zero. So
+four more series are consulted, all of them in dcgm-exporter's default counter
+set:
+
+| series | catches |
+|---|---|
+| `DCGM_FI_DEV_GPU_UTIL` | compute on the SMs |
+| `DCGM_FI_DEV_ENC_UTIL` / `DCGM_FI_DEV_DEC_UTIL` | video encode / decode |
+| `DCGM_FI_DEV_MEM_COPY_UTIL` | host↔device transfer, data loading, checkpointing |
+| `DCGM_FI_DEV_FB_USED` | a model parked in framebuffer between requests |
+
+**A device where any of them was ever non-zero is not idle**, whatever the SM
+gauge said. A sixth series, `DCGM_FI_DEV_POWER_USAGE`, corroborates the verdict
+from a different sensor entirely. If a series is missing the scan says so in a
+warning, rather than quietly narrowing what "no work" means.
+
+**3. Judge — a duration, and the right to refuse.**
+Fallow time is the trailing run of zeros up to now, not an average and not the
+age of the object. The rules that stop a number from being produced matter more
+than the arithmetic:
+
+- **No samples is not zero samples.** A series that returned nothing is
+  *unknown*. An exporter that died last week would otherwise generate a
+  cluster-wide recommendation to delete everything.
+- **When two queries disagree, believe the disagreement.** The aggregate
+  (`max_over_time`) and the stepped range query are asked separately. If the
+  aggregate proves the device did work but the range query cannot say when, no
+  claim is made. This is not hypothetical: at a 14-day window the range query
+  exceeded Prometheus's point limit and a GPU running at 78% was briefly
+  reported as having done nothing at all.
+- **Thin evidence caps confidence, and very thin evidence withdraws the claim.**
+  Under 80% sample coverage nothing is reported at all. Under 95%, or with no
+  power series to corroborate, the finding is capped at `medium` — and
+  `--min-confidence` decides what you are shown.
+- **Power has to agree.** Idle is corroborated when mean draw is under 20% of
+  board TDP. An A100 doing nothing draws roughly 50–60 W of its 400 W.
+
+**4. Attribute — who can act on it.**
+Ownership resolves pod → controller → namespace, taking the first of
+`ullage.dev/owner`, `owner`, `app.kubernetes.io/owner` or `team`, then contact
+annotations; node-level findings fall back to the node pool. Every finding
+records *how* it was resolved, so a wrong attribution is debuggable rather than
+infuriating. `app.kubernetes.io/managed-by` is deliberately **not** consulted —
+it names the deploying tool, and "go talk to Helm" helps nobody. `unowned` is a
+first-class answer, because a device nobody claims is itself the finding.
+
+Hours become money by multiplying accelerator-hours by a per-SKU rate; rates are
+approximate list prices unless you supply your own with `--pricing`, and the
+source is printed under every figure. Paid capacity is summed per node as
+`min(node age, window) × accelerators`, so a node created this morning is not
+billed for the whole fortnight.
+
+Every query is printed on request, and none of it is a black box:
+
+```console
+ullage --prometheus http://localhost:9090 --explain-queries
+```
 
 ## Why another tool
 

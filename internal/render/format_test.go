@@ -111,3 +111,24 @@ func TestChainStringJoinsOwnersWithAnArrow(t *testing.T) {
 		})
 	}
 }
+
+// A threshold is quoted in a sentence, where "1h 00m" reads as padding and
+// rounding 90m to "1h" would misstate what the scan was told to do.
+func TestThresholdLabelIsExactAndCompact(t *testing.T) {
+	for _, tc := range []struct {
+		in   time.Duration
+		want string
+	}{
+		{24 * time.Hour, "1d"},
+		{14 * 24 * time.Hour, "14d"},
+		{time.Hour, "1h"},
+		{6 * time.Hour, "6h"},
+		{30 * time.Minute, "30m"},
+		{90 * time.Minute, "1h 30m"},
+		{0, "0"},
+	} {
+		if got := ThresholdLabel(tc.in); got != tc.want {
+			t.Errorf("ThresholdLabel(%s) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
