@@ -18,7 +18,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
       -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
       -o /out/ullage ./cmd/ullage
 
-FROM gcr.io/distroless/static-debian12@sha256:1b7b9f0f0e0a1d2155f531db587cc48ec26aaf97ab64364225f5bf18a054e66a
+FROM gcr.io/distroless/static-debian12@sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2
 COPY --from=build /out/ullage /ullage
 USER 65532:65532
 ENTRYPOINT ["/ullage"]
