@@ -7,7 +7,7 @@
 # Base images are pinned by digest. -trimpath already removes build paths, but
 # a floating tag means the same source produces a different binary next week,
 # which defeats the point of a reproducible build. Dependabot moves these.
-FROM golang:1.25-alpine@sha256:56961d79ea8129efddcc0b8643fd8a5416b4e6228cfd477e3fd61deb2672c587 AS build
+FROM golang:1.25-alpine@sha256:1ae0735f00daffa3aaf1363a5184c0d2dc55c78e3db4ec70241cdac97bf84b59 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
